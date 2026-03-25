@@ -53,9 +53,11 @@ module.exports = async function phase0(scorer, config, context) {
   if (tools.length > 0) {
     const probe = tools[0];
     const probeUrl = `${config.apiUrl}/tools/${probe.id || probe.name}/call`;
+    const probeHeaders = { 'Content-Type': 'application/json' };
+    if (config.apiKey) probeHeaders['Authorization'] = `Bearer ${config.apiKey}`;
     const r = await sf(probeUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: probeHeaders,
       body: JSON.stringify({}),
     });
 

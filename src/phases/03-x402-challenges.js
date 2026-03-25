@@ -28,6 +28,8 @@ module.exports = async function phase3(scorer, config, context) {
     const id = tool.id || tool.name;
     const url = `${config.apiUrl}/tools/${id}/call`;
     const headers = { 'Content-Type': 'application/json' };
+    if (context.freshAuth) headers['Authorization'] = `Bearer ${context.freshAuth}`;
+    else if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
 
     let r = await sf(url, {
       method: 'POST',
