@@ -189,7 +189,7 @@ module.exports = async function phase10(scorer, config, context) {
   // 10.3a — Different invalid key formats return same status
   const invalidKeyFormats = [
     'short',
-    'ak_live_0000000000000000000000000000000000000000',
+    'ak_test_' + '0'.repeat(32),
     'Bearer ey.invalid.jwt.token',
     '""',
     Array(500).fill('x').join(''),

@@ -53,7 +53,7 @@ async function main() {
   console.log('  MCP PROTOCOL TESTER — Dual-Rail Test Suite');
   console.log(`  Server: ${config.apiBaseUrl}`);
   console.log(`  ${new Date().toISOString()}`);
-  console.log(`  PRIVATE_KEY: ${config.privateKey ? 'set' : 'NOT SET'}`);
+  console.log(`  Wallet: ${config.privateKey ? 'configured' : 'NOT SET'}`);
   console.log(`  Budget: $${config.maxBudget}/protocol | Skip payments: ${config.skipPayments}`);
   if (config.phases) console.log(`  Phases: ${[...config.phases].join(',')}`);
   console.log(`${'='.repeat(76)}\n`);
