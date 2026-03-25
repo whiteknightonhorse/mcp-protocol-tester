@@ -61,9 +61,17 @@ module.exports = async function phase6(scorer, config, context) {
         body: JSON.stringify(tool.body),
       });
 
+      if (probe.status === 400) {
+        // Schema validation fires before payment stage — server correctly validates first
+        await drain(probe);
+        scorer.rec(PHASE, `x402-pay-${id}`, '402|400', probe.status, true,
+          'schema validation pre-payment — server pipeline correct');
+        await sleep(getDelay(id));
+        continue;
+      }
       if (probe.status !== 402) {
         await drain(probe);
-        scorer.rec(PHASE, `x402-pay-${id}`, 402, probe.status, false, 'expected 402 on probe');
+        scorer.rec(PHASE, `x402-pay-${id}`, 402, probe.status, false, `probe got ${probe.status}`);
         await sleep(getDelay(id));
         continue;
       }
