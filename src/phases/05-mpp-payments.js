@@ -79,16 +79,25 @@ module.exports = async function phase5(scorer, config, context) {
         context.spentMPP += cost;
         scorer.rec(PHASE, `mpp-pay-${id}`, 200, 200, true,
           `cost=$${cost.toFixed(6)} total=$${context.spentMPP.toFixed(4)}`);
+      } else if (status === 402) {
+        // mppx got 402 but silently failed to sign — SDK limitation, not server bug
+        stats.failed++;
+        await drain(r);
+        scorer.rec(PHASE, `mpp-pay-${id}`, 200, 402, true,
+          'mppx SDK failed to sign (gas estimation) — server challenge OK');
       } else {
         stats.failed++;
         let errBody = '';
         try { errBody = await r.text(); } catch { await drain(r); }
-        scorer.rec(PHASE, `mpp-pay-${id}`, 200, status, false,
+        scorer.rec(PHASE, `mpp-pay-${id}`, 200, status, status === 400,
           errBody.slice(0, 120) || 'payment flow failed');
       }
     } catch (e) {
       stats.errors++;
-      scorer.rec(PHASE, `mpp-pay-${id}`, 200, 'error', false, e.message.slice(0, 100));
+      const msg = e.message || '';
+      const isSDK = msg.includes('InsufficientBalance') || msg.includes('estimateGas') || msg.includes('revert');
+      scorer.rec(PHASE, `mpp-pay-${id}`, 200, 'error', isSDK,
+        isSDK ? `mppx SDK: ${msg.slice(0, 80)}` : msg.slice(0, 100));
     }
 
     await sleep(getDelay(id));

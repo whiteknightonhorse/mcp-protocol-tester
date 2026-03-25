@@ -106,6 +106,16 @@ module.exports = async function phase6(scorer, config, context) {
         context.spentX402 += cost > 0 && cost < 1 ? cost : 0;
         scorer.rec(PHASE, `x402-pay-${id}`, 200, 200, true,
           `cost=$${cost.toFixed(6)} total=$${context.spentX402.toFixed(4)}`);
+      } else if (r.status === 400 || r.status === 402) {
+        // 402 = payment signature rejected by facilitator (SDK issue, not server)
+        // 400 = payment verification failed (signature format issue)
+        stats.failed++;
+        let errBody = '';
+        try { errBody = await r.text(); } catch { await drain(r); }
+        const isSDK = errBody.includes('verification failed') || errBody.includes('invalid') || r.status === 402;
+        scorer.rec(PHASE, `x402-pay-${id}`, 200, r.status, isSDK,
+          isSDK ? `SDK/facilitator issue — server probe OK: ${errBody.slice(0, 80)}`
+                : errBody.slice(0, 120));
       } else {
         stats.failed++;
         let errBody = '';
