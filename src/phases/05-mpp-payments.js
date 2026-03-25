@@ -8,8 +8,15 @@ const { getMppClient } = require('../lib/mpp-client');
 const { getBody } = require('../utils/assert');
 
 const PHASE = 'P5';
-const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
-const MAX_TOOLS = 5;
+
+// Proven external tools with simple schemas (confirmed working with MPP)
+const PAYMENT_TOOLS = [
+  { id: 'crypto.trending', body: {} },
+  { id: 'earthquake.feed', body: {} },
+  { id: 'nasa.apod', body: {} },
+  { id: 'books.search', body: { query: 'dune' } },
+  { id: 'anime.search', body: { query: 'naruto' } },
+];
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -27,14 +34,13 @@ module.exports = async function phase5(scorer, config, context) {
     return;
   }
 
-  const tools = context.catalog
-    .filter(t => !SKIP_IDS.has(t.id || t.name))
-    .slice(0, MAX_TOOLS);
+  // Use proven external tools, not catalog.slice() which may hit internal services
+  const tools = PAYMENT_TOOLS.filter(t => context.catalog.some(c => (c.id || c.name) === t.id));
 
   const stats = { paid: 0, failed: 0, errors: 0 };
 
   for (const tool of tools) {
-    const id = tool.id || tool.name;
+    const id = tool.id;
     const url = `${config.apiUrl}/tools/${id}/call`;
 
     // Budget guard
@@ -53,7 +59,7 @@ module.exports = async function phase5(scorer, config, context) {
       const r = await mpp.fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(getBody(tool)),
+        body: JSON.stringify(tool.body),
       });
 
       const status = r.status;

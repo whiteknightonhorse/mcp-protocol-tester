@@ -8,8 +8,15 @@ const { getX402Client, makeX402Payment } = require('../lib/x402-client');
 const { getBody } = require('../utils/assert');
 
 const PHASE = 'P6';
-const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
-const MAX_TOOLS = 5;
+
+// Proven external tools with simple schemas (confirmed working with x402)
+const PAYMENT_TOOLS = [
+  { id: 'crypto.trending', body: {} },
+  { id: 'earthquake.feed', body: {} },
+  { id: 'nasa.apod', body: {} },
+  { id: 'books.search', body: { query: 'dune' } },
+  { id: 'anime.search', body: { query: 'naruto' } },
+];
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -27,14 +34,13 @@ module.exports = async function phase6(scorer, config, context) {
     return;
   }
 
-  const tools = context.catalog
-    .filter(t => !SKIP_IDS.has(t.id || t.name))
-    .slice(0, MAX_TOOLS);
+  // Use proven external tools, not catalog.slice() which may hit internal services
+  const tools = PAYMENT_TOOLS.filter(t => context.catalog.some(c => (c.id || c.name) === t.id));
 
   const stats = { paid: 0, failed: 0, errors: 0 };
 
   for (const tool of tools) {
-    const id = tool.id || tool.name;
+    const id = tool.id;
     const url = `${config.apiUrl}/tools/${id}/call`;
 
     // Budget guard
@@ -47,12 +53,12 @@ module.exports = async function phase6(scorer, config, context) {
     try {
       // Step 1: Probe to get 402 response with x402 body
       const probeHeaders = { 'Content-Type': 'application/json' };
-      if (context.freshAuth) probeHeaders['X-API-Key'] = context.freshAuth;
+      if (context.freshAuth) probeHeaders['Authorization'] = `Bearer ${context.freshAuth}`;
       else if (config.apiKey) probeHeaders['Authorization'] = `Bearer ${config.apiKey}`;
       const probe = await sf(url, {
         method: 'POST',
         headers: probeHeaders,
-        body: JSON.stringify(getBody(tool)),
+        body: JSON.stringify(tool.body),
       });
 
       if (probe.status !== 402) {
@@ -81,10 +87,14 @@ module.exports = async function phase6(scorer, config, context) {
         'X-PAYMENT': Object.values(paymentSig)[0],
       };
 
+      // Add API key to payment request too
+      if (context.freshAuth) payHeaders['Authorization'] = `Bearer ${context.freshAuth}`;
+      else if (config.apiKey) payHeaders['Authorization'] = `Bearer ${config.apiKey}`;
+
       const r = await sf(url, {
         method: 'POST',
         headers: payHeaders,
-        body: JSON.stringify(getBody(tool)),
+        body: JSON.stringify(tool.body),
       });
 
       if (r.status === 200) {
