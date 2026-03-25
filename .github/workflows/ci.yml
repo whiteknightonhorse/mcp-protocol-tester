@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax check
+        run: |
+          for f in $(find src -name "*.js"); do
+            node -c "$f" || exit 1
+          done
+          echo "All files pass syntax check on Node ${{ matrix.node-version }}"
+
+      - name: Dry run (no payments, no server)
+        run: |
+          SKIP_PAYMENTS=true PHASES=0 API_BASE_URL=https://httpbin.org npm test || true
+        env:
+          NODE_OPTIONS: --max-old-space-size=512

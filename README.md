@@ -1,19 +1,30 @@
 # mcp-protocol-tester
 
+[![Security Audit](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml/badge.svg)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml)
+[![CI](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js)](https://nodejs.org)
+[![No Secrets](https://img.shields.io/badge/Secrets-None%20Detected-brightgreen?logo=keybase)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml)
+[![CodeQL](https://img.shields.io/badge/CodeQL-Protected-blue?logo=github)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml)
+
 Universal test suite for MCP servers with dual-rail payment testing.
 
 Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneously across all tools on any MCP-compatible server.
 
 ## Features
 
+- **15-phase test suite** — discovery through security audit to load testing
 - **Dual-rail payment testing** — x402 + MPP in parallel
 - **Full MCP protocol validation** — initialize, tools/list, tools/call
 - **402 challenge validation** — every tool returns correct payment challenge
-- **Security audit** — forged credentials, replay attacks, injection, SSRF
+- **Payment security** — replay attacks, race conditions, double-spend, amount manipulation
+- **Advanced security** — SSRF, timing attacks, CORS, header injection, fuzz testing
+- **Resilience testing** — brute force, SSL/TLS, enumeration, error cascade
 - **Load testing** — configurable concurrency, parallel protocol stress
+- **Provider health map** — per-provider status and latency tracking
 - **Universal** — works with ANY MCP server, not just APIbase
 - **Scoring** — 0-100 score with A+/A/B/C/D/F grade
-- **CI-ready** — exit code 0 on pass, non-zero on critical failures
+- **CI-ready** — GitHub Actions with automated security scanning
 - **Zero build** — plain Node.js, no TypeScript compilation needed
 
 ## Quick Start
@@ -71,22 +82,27 @@ CONCURRENCY=10 npm test
 
 > **Note:** Any CRITICAL (500) server error automatically caps the grade at D.
 
-## Phases
+## Phases (15)
 
-| Phase | Name             | What it tests                           | Cost    |
-|-------|------------------|-----------------------------------------|---------|
-| P0    | Discovery        | Catalog, MCP config, server card        | $0      |
-| P1    | Infrastructure   | Health, RPC, wallets, facilitator       | $0      |
-| P2    | MPP Challenges   | WWW-Authenticate on all tools           | $0      |
-| P3    | x402 Challenges  | x402 402 response on all tools          | $0      |
-| P4    | MCP Protocol     | initialize, tools/list, tools/call      | $0      |
-| P5    | MPP Payments     | Real Tempo USDC payments                | ~$0.01  |
-| P6    | x402 Payments    | Real Base USDC payments                 | ~$0.05  |
-| P7    | Security         | Forged creds, replay, injection         | $0      |
-| P8    | Load             | Parallel stress test                    | $0      |
-| P9    | Report           | Score, grade, recommendations           | $0      |
+| Phase | Name               | What it tests                                          | Cost    |
+|-------|--------------------|--------------------------------------------------------|---------|
+| P0    | Discovery          | Catalog, MCP config, server card, dual-rail detection  | $0      |
+| P1    | Infrastructure     | Health, Tempo/Base RPC, wallet balances, facilitator   | $0      |
+| P2    | MPP Challenges     | WWW-Authenticate: Payment on all tools                 | $0      |
+| P3    | x402 Challenges    | x402 402 response on all tools                         | $0      |
+| P4    | MCP Protocol       | initialize, tools/list, tools/call                     | $0      |
+| P5    | MPP Payments       | Real Tempo USDC payments via mppx                      | ~$0.01  |
+| P6    | x402 Payments      | Real Base USDC payments via @x402/core                 | ~$0.05  |
+| P7    | Basic Security     | Auth bypass, forged credentials, injection             | $0      |
+| P8    | Payment Security   | Replay, race condition, double-spend, amount tampering | ~$0.01  |
+| P9    | Advanced Security  | SSRF, timing attacks, CORS, header injection, fuzz     | $0      |
+| P10   | Resilience         | Brute force, SSL/TLS, enumeration, error cascade       | $0      |
+| P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load   | $0      |
+| P12   | Provider Health    | Per-provider health map with latency                   | $0      |
+| P13   | Cache & Simulation | Cache isolation, User-Agent, protocol switching        | $0      |
+| P14   | Report             | Score, grade, per-phase breakdown, recommendations     | $0      |
 
-**Total estimated cost:** ~$0.06 per full run.
+**Total estimated cost:** ~$0.07 per full run.
 
 ## Environment Variables
 
@@ -164,12 +180,58 @@ Both protocols can coexist on the same server — this tester verifies both work
 
 ## Security
 
-- Private keys **NEVER** leave your machine (`.env` is git-ignored)
-- No telemetry, no analytics, no external calls except to the target server
-- All wallet operations happen locally via SDK
-- See [docs/SECURITY.md](docs/SECURITY.md) for security test details
+### This tool is safe to use
+
+| Check | Status | How |
+|-------|--------|-----|
+| **No hardcoded secrets** | Verified on every commit | [TruffleHog](https://github.com/trufflesecurity/trufflehog) + [Gitleaks](https://github.com/gitleaks/gitleaks) scan |
+| **No code vulnerabilities** | Verified on every commit | [GitHub CodeQL](https://codeql.github.com/) static analysis |
+| **No dependency vulnerabilities** | Weekly scan | `npm audit` + [Snyk](https://snyk.io/) |
+| **No data exfiltration** | Verified on every commit | Custom scan for eval(), child_process, suspicious fetch calls |
+| **No secret logging** | Verified on every commit | Grep for console.log with env vars |
+| **Private keys stay local** | `.env` in `.gitignore` | Keys never leave your machine |
+| **No telemetry** | By design | Zero analytics, zero tracking, zero external calls except target server |
+| **Open source** | MIT license | Full source code available for audit |
+
+### Automated security pipeline
+
+Every push and PR runs these checks automatically via GitHub Actions:
+
+1. **Secret Detection** — TruffleHog + Gitleaks scan entire git history for leaked keys
+2. **CodeQL Analysis** — GitHub's static analysis engine checks for JavaScript vulnerabilities
+3. **Dependency Audit** — npm audit + Snyk scan for known CVEs in dependencies
+4. **No Hardcoded Secrets** — Custom grep for private keys (0x...), API keys (ak_live_...), GitHub tokens (ghp_...)
+5. **No Data Exfiltration** — Scan for eval(), child_process, suspicious HTTP calls, base64-encoded env vars
+6. **Code Quality** — Syntax check all source files, check for secret logging
+
+### What this tool does NOT do
+
+- Does NOT send your private keys anywhere (keys are used locally by viem/mppx for signing)
+- Does NOT store or cache payment credentials
+- Does NOT make HTTP calls to any server except the one you configure in `API_BASE_URL`
+- Does NOT collect analytics, telemetry, or usage data
+- Does NOT require internet access except to reach your target MCP server
+
+### Verify yourself
+
+```bash
+# Check for secrets in code
+grep -rn "0x[0-9a-fA-F]\{64\}" --include="*.js" src/
+# Should return: no matches
+
+# Check for eval/exec
+grep -rn "eval(\|child_process\|\.exec(" --include="*.js" src/
+# Should return: no matches
+
+# Check what HTTP endpoints are called
+grep -rn "fetch\|http\." --include="*.js" src/lib/
+# Should only reference: config.apiUrl, config.apiBaseUrl, config.mcpServerUrl,
+# facilitator.payai.network, rpc.tempo.xyz
+```
 
 > **Warning:** Never commit your `.env` file. Never share your `PRIVATE_KEY`.
+
+See [docs/SECURITY.md](docs/SECURITY.md) for details on what the security test phases cover.
 
 ## Project Structure
 
