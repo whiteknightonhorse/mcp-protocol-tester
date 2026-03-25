@@ -52,8 +52,15 @@ module.exports = async function phase5(scorer, config, context) {
 
     try {
       const headers = { 'Content-Type': 'application/json' };
-      if (context.freshAuth) headers['X-API-Key'] = context.freshAuth;
-      else if (config.apiKey) headers['X-API-Key'] = config.apiKey;
+      // Must use Authorization: Bearer for initial request (mppx replaces with Payment on retry)
+      // Also send X-API-Key as fallback so server can identify agent after mppx replaces Authorization
+      if (context.freshAuth) {
+        headers['Authorization'] = `Bearer ${context.freshAuth}`;
+        headers['X-API-Key'] = context.freshAuth;
+      } else if (config.apiKey) {
+        headers['Authorization'] = `Bearer ${config.apiKey}`;
+        headers['X-API-Key'] = config.apiKey;
+      }
 
       // Use MPP client fetch which handles the 402 -> sign -> retry flow
       const r = await mpp.fetch(url, {
@@ -74,8 +81,10 @@ module.exports = async function phase5(scorer, config, context) {
           `cost=$${cost.toFixed(6)} total=$${context.spentMPP.toFixed(4)}`);
       } else {
         stats.failed++;
-        await drain(r);
-        scorer.rec(PHASE, `mpp-pay-${id}`, 200, status, false, 'payment flow failed');
+        let errBody = '';
+        try { errBody = await r.text(); } catch { await drain(r); }
+        scorer.rec(PHASE, `mpp-pay-${id}`, 200, status, false,
+          errBody.slice(0, 120) || 'payment flow failed');
       }
     } catch (e) {
       stats.errors++;

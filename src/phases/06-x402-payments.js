@@ -108,9 +108,10 @@ module.exports = async function phase6(scorer, config, context) {
           `cost=$${cost.toFixed(6)} total=$${context.spentX402.toFixed(4)}`);
       } else {
         stats.failed++;
-        await drain(r);
+        let errBody = '';
+        try { errBody = await r.text(); } catch { await drain(r); }
         scorer.rec(PHASE, `x402-pay-${id}`, 200, r.status, false,
-          `payment rejected status=${r.status}`);
+          errBody.slice(0, 120) || `payment rejected status=${r.status}`);
       }
     } catch (e) {
       stats.errors++;
