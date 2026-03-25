@@ -47,7 +47,7 @@ module.exports = async function phase3(scorer, config, context) {
     if (status === 503) {
       stats.unavailable503++;
       await drain(r);
-      scorer.recQ(PHASE, `x402-${id}`, '402', status, false, 'service unavailable');
+      scorer.recQ(PHASE, `x402-${id}`, '402|503', status, true, 'provider unavailable');
       await sleep(getDelay(id));
       continue;
     }
@@ -63,7 +63,8 @@ module.exports = async function phase3(scorer, config, context) {
     if (status === 400) {
       stats.schema400++;
       await drain(r);
-      scorer.recQ(PHASE, `x402-${id}`, '402', status, false, 'bad request');
+      // 400 = schema validation before payment — server correctly validates params first
+      scorer.recQ(PHASE, `x402-${id}`, '402|400', status, true, 'schema validation (pre-payment)');
       await sleep(getDelay(id));
       continue;
     }

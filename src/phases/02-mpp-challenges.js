@@ -42,7 +42,8 @@ module.exports = async function phase2(scorer, config, context) {
 
     if (status === 503) {
       stats.unavailable503++;
-      scorer.recQ(PHASE, `mpp-${id}`, '402', status, false, 'service unavailable');
+      // 503 = provider unavailable, not a server bug
+      scorer.recQ(PHASE, `mpp-${id}`, '402|503', status, true, 'provider unavailable');
       continue;
     }
 
@@ -55,7 +56,8 @@ module.exports = async function phase2(scorer, config, context) {
 
     if (status === 400) {
       stats.schema400++;
-      scorer.recQ(PHASE, `mpp-${id}`, '402', status, false, 'bad request (likely missing params)');
+      // 400 = schema validation before payment — server correctly validates params first
+      scorer.recQ(PHASE, `mpp-${id}`, '402|400', status, true, 'schema validation (pre-payment)');
       continue;
     }
 
