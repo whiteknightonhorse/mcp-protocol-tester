@@ -18,17 +18,22 @@ const { initX402, getWalletAddress } = require('./lib/x402-client');
 const { initMPP } = require('./lib/mpp-client');
 const { generateReport } = require('./lib/reporter');
 
-// Phase modules
-const phase0 = require('./phases/00-discovery');
-const phase1 = require('./phases/01-infrastructure');
-const phase2 = require('./phases/02-mpp-challenges');
-const phase3 = require('./phases/03-x402-challenges');
-const phase4 = require('./phases/04-mcp-protocol');
-const phase5 = require('./phases/05-mpp-payments');
-const phase6 = require('./phases/06-x402-payments');
-const phase7 = require('./phases/07-security');
-const phase8 = require('./phases/08-load');
-const phase9 = require('./phases/09-report');
+// Phase modules (15 phases: P0-P14)
+const phase0  = require('./phases/00-discovery');
+const phase1  = require('./phases/01-infrastructure');
+const phase2  = require('./phases/02-mpp-challenges');
+const phase3  = require('./phases/03-x402-challenges');
+const phase4  = require('./phases/04-mcp-protocol');
+const phase5  = require('./phases/05-mpp-payments');
+const phase6  = require('./phases/06-x402-payments');
+const phase7  = require('./phases/07-security');
+const phase8  = require('./phases/08-payment-security');
+const phase9  = require('./phases/09-advanced-security');
+const phase10 = require('./phases/10-resilience');
+const phase11 = require('./phases/11-load');
+const phase12 = require('./phases/12-provider-health');
+const phase13 = require('./phases/13-cache-simulation');
+const phase14 = require('./phases/09-report');
 
 async function main() {
   const t0 = Date.now();
@@ -59,26 +64,33 @@ async function main() {
   console.log(`  x402 wallet: ${x402ok ? getWalletAddress() : 'NONE'}`);
   console.log(`  MPP client:  ${mppok ? 'ready' : 'NONE'}\n`);
 
-  // Run phases
-  if (config.phaseEnabled(0)) await phase0(scorer, config, context);
-  if (config.phaseEnabled(1)) await phase1(scorer, config, context);
-  if (config.phaseEnabled(2)) await phase2(scorer, config, context);
-  if (config.phaseEnabled(3)) await phase3(scorer, config, context);
-  if (config.phaseEnabled(4)) await phase4(scorer, config, context);
-  if (config.phaseEnabled(5)) await phase5(scorer, config, context);
-  if (config.phaseEnabled(6)) await phase6(scorer, config, context);
-  if (config.phaseEnabled(7)) await phase7(scorer, config, context);
-  if (config.phaseEnabled(8)) await phase8(scorer, config, context);
+  // Run phases (P0-P13)
+  if (config.phaseEnabled(0))  await phase0(scorer, config, context);
+  if (config.phaseEnabled(1))  await phase1(scorer, config, context);
+  if (config.phaseEnabled(2))  await phase2(scorer, config, context);
+  if (config.phaseEnabled(3))  await phase3(scorer, config, context);
+  if (config.phaseEnabled(4))  await phase4(scorer, config, context);
+  if (config.phaseEnabled(5))  await phase5(scorer, config, context);
+  if (config.phaseEnabled(6))  await phase6(scorer, config, context);
+  if (config.phaseEnabled(7))  await phase7(scorer, config, context);
+  if (config.phaseEnabled(8))  await phase8(scorer, config, context);
+  if (config.phaseEnabled(9))  await phase9(scorer, config, context);
+  if (config.phaseEnabled(10)) await phase10(scorer, config, context);
+  if (config.phaseEnabled(11)) await phase11(scorer, config, context);
+  if (config.phaseEnabled(12)) await phase12(scorer, config, context);
+  if (config.phaseEnabled(13)) await phase13(scorer, config, context);
 
-  // Always generate report
+  // P14: Always generate report
   const totalTime = Math.round((Date.now() - t0) / 1000);
-  generateReport(scorer, {
+  const meta = {
     serverUrl: config.apiBaseUrl,
     toolCount: context.catalog.length,
     spentX402: context.spentX402,
     spentMPP: context.spentMPP,
     totalTime,
-  });
+  };
+  await phase14(scorer, config, { ...context, ...meta });
+  generateReport(scorer, meta);
 
   console.log(`\nTotal: ${totalTime}s | x402: $${context.spentX402.toFixed(4)} | MPP: $${context.spentMPP.toFixed(4)}`);
 }

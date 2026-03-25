@@ -13,17 +13,24 @@ function generateReport(scorer, meta) {
   w('  ' + ts);
   w('='.repeat(76));
 
-  // Scoring
-  const weights = [['P0', 10], ['P1', 10], ['P2', 10], ['P3', 10], ['P4', 10],
-    ['P5', 15], ['P6', 15], ['P7', 10], ['P8', 5], ['P9', 5]];
+  // Scoring — 15 phases
+  const weights = [
+    ['P0', 7], ['P1', 7], ['P2', 7], ['P3', 7], ['P4', 7],
+    ['P5', 7], ['P6', 7], ['P7', 6], ['P8', 10], ['P9', 8],
+    ['P10', 7], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 5],
+  ];
   const { pts, total, grade, bp } = scorer.computeGrade(weights);
 
   w(`\nServer: ${meta.serverUrl} | Tools: ${meta.toolCount || '?'}`);
   w(`Assertions: ${scorer.all.length} | Pass: ${scorer.pass.length} | Fail: ${scorer.fail.length}`);
 
   w(''); hr(); w('SCORING'); hr();
-  const labels = ['Discovery', 'Infrastructure', 'MPP Challenges', 'x402 Challenges',
-    'MCP Protocol', 'MPP Payments', 'x402 Payments', 'Security', 'Load Test', 'Summary'];
+  const labels = [
+    'Discovery', 'Infrastructure', 'MPP Challenges', 'x402 Challenges',
+    'MCP Protocol', 'MPP Payments', 'x402 Payments', 'Basic Security',
+    'Payment Security', 'Advanced Security', 'Resilience',
+    'Load Test', 'Provider Health', 'Cache & Simulation', 'Report',
+  ];
   pts.forEach(([, v, mx], i) => w(`  ${(labels[i] || '?').padEnd(24)} ${v}/${mx}`));
   w(`  ${'Total'.padEnd(24)} ${total}/100`);
   w(`  ${'Grade'.padEnd(24)} ${grade}`);
@@ -57,7 +64,7 @@ function generateReport(scorer, meta) {
   }
 
   // Per-phase details
-  for (let i = 0; i <= 9; i++) {
+  for (let i = 0; i <= 14; i++) {
     const id = `P${i}`;
     const items = scorer.all.filter(t => t.phase === id);
     if (items.length === 0) continue;

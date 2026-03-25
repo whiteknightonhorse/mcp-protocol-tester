@@ -6,18 +6,12 @@
  */
 const { generateReport } = require('../lib/reporter');
 
-const PHASE = 'report';
+const PHASE = 'P14';
 
 const WEIGHTS = [
-  ['discovery',       10],
-  ['infra',           10],
-  ['mpp-challenges',  10],
-  ['x402-challenges', 10],
-  ['mcp-protocol',    15],
-  ['mpp-payments',    10],
-  ['x402-payments',   10],
-  ['security',        15],
-  ['load',            10],
+  ['P0', 7], ['P1', 7], ['P2', 7], ['P3', 7], ['P4', 7],
+  ['P5', 7], ['P6', 7], ['P7', 6], ['P8', 10], ['P9', 8],
+  ['P10', 7], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 5],
 ];
 
 module.exports = async function phase9(scorer, config, context) {

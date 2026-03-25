@@ -5,7 +5,7 @@
  */
 const { mcpRequest } = require('../lib/mcp-client');
 
-const PHASE = 'mcp-protocol';
+const PHASE = 'P4';
 
 module.exports = async function phase4(scorer, config, context) {
   console.log('\n--- Phase 4: MCP Protocol ---');

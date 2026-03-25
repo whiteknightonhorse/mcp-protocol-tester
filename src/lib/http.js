@@ -24,6 +24,7 @@ function getDelay(toolId) {
   const delays = {
     music: 1500, anime: 1000, manga: 1000, upc: 10000, diffbot: 500,
     spoonacular: 800, ticketmaster: 600, igdb: 600,
+    hyperliquid: 500, aster: 500, sabre: 600, amadeus: 500, health: 400, education: 400,
   };
   return delays[p] || 350;
 }

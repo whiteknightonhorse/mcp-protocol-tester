@@ -5,7 +5,7 @@
  */
 const { sf, drain } = require('../lib/http');
 
-const PHASE = 'discovery';
+const PHASE = 'P0';
 
 async function wellKnown(scorer, baseUrl, path, label) {
   const r = await sf(`${baseUrl}${path}`);
@@ -20,25 +20,15 @@ async function wellKnown(scorer, baseUrl, path, label) {
 module.exports = async function phase0(scorer, config, context) {
   console.log('\n--- Phase 0: Discovery ---');
 
-  // 1. Fetch tool catalog with pagination
+  // 1. Fetch tool catalog (single request — API returns all tools at once)
   let tools = [];
-  let page = 1;
-  const limit = 100;
-  let hasMore = true;
-
-  while (hasMore) {
-    const url = `${config.apiUrl}/tools?page=${page}&limit=${limit}`;
-    const r = await sf(url);
-    if (r.status !== 200) {
-      scorer.rec(PHASE, 'catalog-fetch', 200, r.status, false, `page ${page} failed`);
-      await drain(r);
-      break;
-    }
-    const data = await r.json();
-    const items = Array.isArray(data) ? data : (data.tools || data.data || []);
-    tools = tools.concat(items);
-    hasMore = items.length === limit;
-    page++;
+  const r0 = await sf(`${config.apiUrl}/tools?limit=1000`);
+  if (r0.status === 200) {
+    const data = await r0.json();
+    tools = Array.isArray(data) ? data : (data.tools || data.data || []);
+  } else {
+    scorer.rec(PHASE, 'catalog-fetch', 200, r0.status, false, 'catalog fetch failed');
+    await drain(r0);
   }
 
   context.catalog = tools;
@@ -62,7 +52,7 @@ module.exports = async function phase0(scorer, config, context) {
   // 3. Probe one tool to detect dual-rail (x402 body + WWW-Authenticate: Payment header)
   if (tools.length > 0) {
     const probe = tools[0];
-    const probeUrl = `${config.apiUrl}/tools/${probe.id || probe.name}/run`;
+    const probeUrl = `${config.apiUrl}/tools/${probe.id || probe.name}/call`;
     const r = await sf(probeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -86,26 +76,13 @@ module.exports = async function phase0(scorer, config, context) {
       `MPP=${hasMppHeader} x402=${hasX402Body}`);
   }
 
-  // 4. Register fresh agent for scanning
-  try {
-    const r = await sf(`${config.apiUrl}/agents/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'mcp-protocol-tester',
-        description: 'Automated test agent',
-      }),
-    });
-    if (r.status === 200 || r.status === 201) {
-      const data = await r.json();
-      context.freshAuth = data.apiKey || data.api_key || data.token || null;
-      scorer.rec(PHASE, 'agent-register', '2xx', r.status, true, 'agent registered');
-    } else {
-      await drain(r);
-      scorer.rec(PHASE, 'agent-register', '2xx', r.status, false, 'registration failed');
-    }
-  } catch (e) {
-    scorer.rec(PHASE, 'agent-register', '2xx', 'error', false, e.message);
+  // 4. Set auth for scanning (uses configured API_KEY — server auto-registers agents)
+  if (config.apiKey) {
+    context.freshAuth = config.apiKey;
+    scorer.rec(PHASE, 'auth-configured', 'API_KEY set', 'set', true, 'using configured API key');
+  } else {
+    scorer.rec(PHASE, 'auth-configured', 'API_KEY set', 'missing', false,
+      'no API_KEY — set API_KEY in .env (server auto-registers on first request)');
   }
 
   console.log(`  Catalog: ${context.catalog.length} tools | MPP: ${context.hasMPP} | x402: ${context.hasX402}`);

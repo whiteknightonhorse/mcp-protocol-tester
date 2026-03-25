@@ -5,7 +5,7 @@
  */
 const { sf, drain } = require('../lib/http');
 
-const PHASE = 'infra';
+const PHASE = 'P1';
 
 const USDC_TEMPO = '0x20C000000000000000000000b9537d11c60E8b50';
 const USDC_BASE  = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';

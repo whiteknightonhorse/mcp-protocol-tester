@@ -4,8 +4,9 @@
  * x402Version===2, accepts[0] with network, asset, payTo, scheme, amount.
  */
 const { sf, drain, getDelay } = require('../lib/http');
+const { getBody } = require('../utils/assert');
 
-const PHASE = 'x402-challenges';
+const PHASE = 'P3';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -25,14 +26,19 @@ module.exports = async function phase3(scorer, config, context) {
 
   for (const tool of tools) {
     const id = tool.id || tool.name;
-    const url = `${config.apiUrl}/tools/${id}/run`;
+    const url = `${config.apiUrl}/tools/${id}/call`;
     const headers = { 'Content-Type': 'application/json' };
 
-    const r = await sf(url, {
+    let r = await sf(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({}),
+      body: JSON.stringify(getBody(tool)),
     });
+
+    if (r.status === 429) {
+      await sleep(10000);
+      r = await sf(url, { method: 'POST', headers, body: JSON.stringify(getBody(tool)) });
+    }
 
     const status = r.status;
 

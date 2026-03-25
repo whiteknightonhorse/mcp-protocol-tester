@@ -1,3 +1,6 @@
+// Auto-load .env file if present
+try { require('dotenv').config(); } catch {}
+
 // Loads and validates environment variables
 const config = {
   apiBaseUrl: process.env.API_BASE_URL || 'https://apibase.pro',

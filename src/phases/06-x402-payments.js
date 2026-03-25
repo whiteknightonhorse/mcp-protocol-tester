@@ -5,8 +5,9 @@
  */
 const { sf, drain, getDelay } = require('../lib/http');
 const { getX402Client, makeX402Payment } = require('../lib/x402-client');
+const { getBody } = require('../utils/assert');
 
-const PHASE = 'x402-payments';
+const PHASE = 'P6';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
 const MAX_TOOLS = 5;
 
@@ -34,7 +35,7 @@ module.exports = async function phase6(scorer, config, context) {
 
   for (const tool of tools) {
     const id = tool.id || tool.name;
-    const url = `${config.apiUrl}/tools/${id}/run`;
+    const url = `${config.apiUrl}/tools/${id}/call`;
 
     // Budget guard
     if (context.spentX402 >= config.maxBudget) {
@@ -46,10 +47,12 @@ module.exports = async function phase6(scorer, config, context) {
     try {
       // Step 1: Probe to get 402 response with x402 body
       const probeHeaders = { 'Content-Type': 'application/json' };
+      if (context.freshAuth) probeHeaders['X-API-Key'] = context.freshAuth;
+      else if (config.apiKey) probeHeaders['Authorization'] = `Bearer ${config.apiKey}`;
       const probe = await sf(url, {
         method: 'POST',
         headers: probeHeaders,
-        body: JSON.stringify({}),
+        body: JSON.stringify(getBody(tool)),
       });
 
       if (probe.status !== 402) {
@@ -74,13 +77,14 @@ module.exports = async function phase6(scorer, config, context) {
       // Step 3: Retry with payment headers
       const payHeaders = {
         'Content-Type': 'application/json',
-        'X-PAYMENT': paymentSig,
+        ...paymentSig,
+        'X-PAYMENT': Object.values(paymentSig)[0],
       };
 
       const r = await sf(url, {
         method: 'POST',
         headers: payHeaders,
-        body: JSON.stringify({}),
+        body: JSON.stringify(getBody(tool)),
       });
 
       if (r.status === 200) {

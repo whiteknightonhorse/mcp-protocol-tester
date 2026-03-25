@@ -5,8 +5,9 @@
  */
 const { sf, drain, getDelay } = require('../lib/http');
 const { parseMppChallenge } = require('../lib/mpp-client');
+const { getBody } = require('../utils/assert');
 
-const PHASE = 'mpp-challenges';
+const PHASE = 'P2';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -19,16 +20,21 @@ module.exports = async function phase2(scorer, config, context) {
 
   for (const tool of tools) {
     const id = tool.id || tool.name;
-    const url = `${config.apiUrl}/tools/${id}/run`;
+    const url = `${config.apiUrl}/tools/${id}/call`;
     const headers = { 'Content-Type': 'application/json' };
     if (context.freshAuth) headers['X-API-Key'] = context.freshAuth;
     else if (config.apiKey) headers['X-API-Key'] = config.apiKey;
 
-    const r = await sf(url, {
+    let r = await sf(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({}),
+      body: JSON.stringify(getBody(tool)),
     });
+
+    if (r.status === 429) {
+      await sleep(10000);
+      r = await sf(url, { method: 'POST', headers, body: JSON.stringify(getBody(tool)) });
+    }
 
     const wwwAuth = r.headers?.get?.('www-authenticate') || '';
     const status = r.status;

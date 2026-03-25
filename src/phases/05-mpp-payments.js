@@ -5,8 +5,9 @@
  */
 const { sf, drain, getDelay } = require('../lib/http');
 const { getMppClient } = require('../lib/mpp-client');
+const { getBody } = require('../utils/assert');
 
-const PHASE = 'mpp-payments';
+const PHASE = 'P5';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
 const MAX_TOOLS = 5;
 
@@ -34,7 +35,7 @@ module.exports = async function phase5(scorer, config, context) {
 
   for (const tool of tools) {
     const id = tool.id || tool.name;
-    const url = `${config.apiUrl}/tools/${id}/run`;
+    const url = `${config.apiUrl}/tools/${id}/call`;
 
     // Budget guard
     if (context.spentMPP >= config.maxBudget) {
@@ -52,7 +53,7 @@ module.exports = async function phase5(scorer, config, context) {
       const r = await mpp.fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({}),
+        body: JSON.stringify(getBody(tool)),
       });
 
       const status = r.status;

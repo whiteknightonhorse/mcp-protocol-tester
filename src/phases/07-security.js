@@ -6,7 +6,7 @@
 const { sf, drain } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
 
-const PHASE = 'security';
+const PHASE = 'P7';
 
 function expectStatus(scorer, name, expected, actual, det = '') {
   const ok = Array.isArray(expected)
@@ -20,8 +20,8 @@ module.exports = async function phase7(scorer, config, context) {
   console.log('\n--- Phase 7: Security ---');
 
   const toolUrl = context.catalog.length > 0
-    ? `${config.apiUrl}/tools/${context.catalog[0].id || context.catalog[0].name}/run`
-    : `${config.apiUrl}/tools/crypto.market.trending/run`;
+    ? `${config.apiUrl}/tools/${context.catalog[0].id || context.catalog[0].name}/call`
+    : `${config.apiUrl}/tools/crypto.market.trending/call`;
   const postOpts = (headers = {}) => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
@@ -105,7 +105,7 @@ module.exports = async function phase7(scorer, config, context) {
 
   // 12. SQL injection in tool ID
   const sqli = "'; DROP TABLE tools; --";
-  const r12 = await sf(`${config.apiUrl}/tools/${encodeURIComponent(sqli)}/run`, postOpts());
+  const r12 = await sf(`${config.apiUrl}/tools/${encodeURIComponent(sqli)}/call`, postOpts());
   const sqliSafe = r12.status === 400 || r12.status === 404 || r12.status === 422;
   expectStatus(scorer, 'sql-injection-tool-id', [400, 404, 422], r12.status,
     sqliSafe ? 'properly rejected' : 'SUSPICIOUS response');
