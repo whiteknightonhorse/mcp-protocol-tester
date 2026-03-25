@@ -1,0 +1,29 @@
+# Private keys — NEVER commit
+.env
+*.key
+*.pem
+*private*
+
+# Reports with sensitive data
+reports/*.txt
+reports/*.json
+reports/*.log
+reports/*.md
+!reports/.gitkeep
+*-report-*.txt
+*-stress-*.log
+
+# Node
+node_modules/
+dist/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

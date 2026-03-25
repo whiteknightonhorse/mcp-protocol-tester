@@ -1,0 +1,35 @@
+{
+  "name": "mcp-protocol-tester",
+  "version": "1.0.0",
+  "description": "Universal test suite for MCP servers — dual-rail payment testing (x402 + MPP/Tempo), 402 challenge validation, security audit, load testing",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node src/index.js",
+    "test:dry": "SKIP_PAYMENTS=true node src/index.js",
+    "test:fast": "PHASES=0,1,4 node src/index.js",
+    "test:security": "PHASES=0,7 node src/index.js",
+    "test:payments": "PHASES=0,5,6 node src/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "x402",
+    "mpp",
+    "tempo",
+    "payment",
+    "testing",
+    "api",
+    "protocol"
+  ],
+  "author": "whiteknightonhorse",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whiteknightonhorse/mcp-protocol-tester.git"
+  },
+  "dependencies": {
+    "@x402/core": "^2.7.0",
+    "@x402/evm": "^2.7.0",
+    "mppx": "^0.4.9",
+    "viem": "^2.47.5"
+  }
+}
