@@ -6,12 +6,13 @@
  */
 const { generateReport } = require('../lib/reporter');
 
-const PHASE = 'P14';
+const PHASE = 'P15';
 
 const WEIGHTS = [
-  ['P0', 7], ['P1', 7], ['P2', 7], ['P3', 7], ['P4', 7],
-  ['P5', 7], ['P6', 7], ['P7', 6], ['P8', 10], ['P9', 8],
-  ['P10', 7], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 5],
+  ['P0', 6], ['P1', 6], ['P2', 6], ['P3', 6], ['P4', 6],
+  ['P5', 6], ['P6', 6], ['P7', 6], ['P8', 9], ['P9', 7],
+  ['P10', 6], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 6],
+  ['P15', 4],
 ];
 
 module.exports = async function phase9(scorer, config, context) {

@@ -13,11 +13,12 @@ function generateReport(scorer, meta) {
   w('  ' + ts);
   w('='.repeat(76));
 
-  // Scoring — 15 phases
+  // Scoring — 16 phases
   const weights = [
-    ['P0', 7], ['P1', 7], ['P2', 7], ['P3', 7], ['P4', 7],
-    ['P5', 7], ['P6', 7], ['P7', 6], ['P8', 10], ['P9', 8],
-    ['P10', 7], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 5],
+    ['P0', 6], ['P1', 6], ['P2', 6], ['P3', 6], ['P4', 6],
+    ['P5', 6], ['P6', 6], ['P7', 6], ['P8', 9], ['P9', 7],
+    ['P10', 6], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 6],
+    ['P15', 4],
   ];
   const { pts, total, grade, bp } = scorer.computeGrade(weights);
 
@@ -29,7 +30,8 @@ function generateReport(scorer, meta) {
     'Discovery', 'Infrastructure', 'MPP Challenges', 'x402 Challenges',
     'MCP Protocol', 'MPP Payments', 'x402 Payments', 'Basic Security',
     'Payment Security', 'Advanced Security', 'Resilience',
-    'Load Test', 'Provider Health', 'Cache & Simulation', 'Report',
+    'Load Test', 'Provider Health', 'Cache & Simulation', 'Discover Tools',
+    'Report',
   ];
   pts.forEach(([, v, mx], i) => w(`  ${(labels[i] || '?').padEnd(24)} ${v}/${mx}`));
   w(`  ${'Total'.padEnd(24)} ${total}/100`);
@@ -64,7 +66,7 @@ function generateReport(scorer, meta) {
   }
 
   // Per-phase details
-  for (let i = 0; i <= 14; i++) {
+  for (let i = 0; i <= 15; i++) {
     const id = `P${i}`;
     const items = scorer.all.filter(t => t.phase === id);
     if (items.length === 0) continue;
