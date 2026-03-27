@@ -13,18 +13,19 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 
 ## Features
 
-- **15-phase test suite** — discovery through security audit to load testing
-- **Dual-rail payment testing** — x402 + MPP in parallel
-- **Full MCP protocol validation** — initialize, tools/list, tools/call
-- **402 challenge validation** — every tool returns correct payment challenge
-- **Payment security** — replay attacks, race conditions, double-spend, amount manipulation
-- **Advanced security** — SSRF, timing attacks, CORS, header injection, fuzz testing
-- **Resilience testing** — brute force, SSL/TLS, enumeration, error cascade
-- **Load testing** — configurable concurrency, parallel protocol stress
+- **16-phase test suite** — 700+ assertions across discovery, payments, security, and load
+- **Dual-rail payment testing** — x402 + MPP in parallel with cross-rail price validation
+- **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
+- **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
+- **Payment security** — replay attacks, race conditions, double-spend, amount manipulation, stale challenges
+- **Advanced security** — SSRF, timing attacks, CORS, header injection, fuzz testing, response analysis
+- **Resilience testing** — brute force, SSL/TLS cipher/cert validation, enumeration, error cascade
+- **Load testing** — ramp-up stress, latency percentiles (p50/p95/p99), sustained load
+- **Tool discovery** — discover_tools prompt validation, stemming, category enumeration, abuse testing
 - **Provider health map** — per-provider status and latency tracking
 - **Universal** — works with ANY MCP server, not just APIbase
 - **Scoring** — 0-100 score with A+/A/B/C/D/F grade
-- **CI-ready** — GitHub Actions with automated security scanning
+- **CI-ready** — GitHub Actions with TruffleHog, Gitleaks, CodeQL, Snyk
 - **Zero build** — plain Node.js, no TypeScript compilation needed
 
 ## Quick Start
@@ -41,7 +42,7 @@ npm test
 ## Usage
 
 ```bash
-# Full dual-rail test (x402 + MPP)
+# Full dual-rail test (all 16 phases)
 npm test
 
 # Dry run — no real payments, tests challenges and security only
@@ -50,7 +51,7 @@ npm run test:dry
 # Fast mode — discovery + infrastructure + MCP only
 npm run test:fast
 
-# Security audit only
+# Security audit (basic + payment + advanced + resilience)
 npm run test:security
 
 # Payment tests only
@@ -60,7 +61,7 @@ npm run test:payments
 API_BASE_URL=https://my-server.com npm test
 
 # Specific phases
-PHASES=0,1,7 npm test
+PHASES=0,1,7,8,9,10 npm test
 
 # Load test with 10 concurrent requests
 CONCURRENCY=10 npm test
@@ -80,46 +81,47 @@ CONCURRENCY=10 npm test
 | D     | 60-69   | Critical issues found                    |
 | F     | <60     | Major failures, not production-ready     |
 
-> **Note:** Any CRITICAL (500) server error automatically caps the grade at D.
+> **Note:** Any CRITICAL (500) server error automatically caps the grade at D. Skipped phases score 0%.
 
-## Phases (15)
+## Phases (16)
 
-| Phase | Name               | What it tests                                          | Cost    |
-|-------|--------------------|--------------------------------------------------------|---------|
-| P0    | Discovery          | Catalog, MCP config, server card, dual-rail detection  | $0      |
-| P1    | Infrastructure     | Health, Tempo/Base RPC, wallet balances, facilitator   | $0      |
-| P2    | MPP Challenges     | WWW-Authenticate: Payment on all tools                 | $0      |
-| P3    | x402 Challenges    | x402 402 response on all tools                         | $0      |
-| P4    | MCP Protocol       | initialize, tools/list, tools/call                     | $0      |
-| P5    | MPP Payments       | Real Tempo USDC payments via mppx                      | ~$0.01  |
-| P6    | x402 Payments      | Real Base USDC payments via @x402/core                 | ~$0.05  |
-| P7    | Basic Security     | Auth bypass, forged credentials, injection             | $0      |
-| P8    | Payment Security   | Replay, race condition, double-spend, amount tampering | ~$0.01  |
-| P9    | Advanced Security  | SSRF, timing attacks, CORS, header injection, fuzz     | $0      |
-| P10   | Resilience         | Brute force, SSL/TLS, enumeration, error cascade       | $0      |
-| P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load   | $0      |
-| P12   | Provider Health    | Per-provider health map with latency                   | $0      |
-| P13   | Cache & Simulation | Cache isolation, User-Agent, protocol switching        | $0      |
-| P14   | Report             | Score, grade, per-phase breakdown, recommendations     | $0      |
+| Phase | Name               | What it tests                                                         | Cost    |
+|-------|--------------------|-----------------------------------------------------------------------|---------|
+| P0    | Discovery          | Catalog fetch, schema validation, `.well-known/*`, dual-rail detection | $0      |
+| P1    | Infrastructure     | Health, Tempo/Base RPC, USDC + gas balances, facilitator              | $0      |
+| P2    | MPP Challenges     | `WWW-Authenticate: Payment` on all tools + field validation (recipient, amount, chainId) | $0 |
+| P3    | x402 Challenges    | x402 402 body on all tools + field validation (payTo, network, asset, scheme, multi-accept) | $0 |
+| P4    | MCP Protocol       | initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation, JSON-RPC error codes | $0 |
+| P5    | MPP Payments       | Real Tempo USDC payments via mppx + response content validation       | ~$0.01  |
+| P6    | x402 Payments      | Real Base USDC payments via @x402/core + response content validation   | ~$0.05  |
+| P7    | Basic Security     | Auth bypass, forged credentials, HTTP method enforcement, Content-Type manipulation, request ID | $0 |
+| P8    | Payment Security   | Replay (same/cross-tool), race condition (10 parallel), double-spend, amount manipulation (0/negative/underpay/tampered payTo), float precision, cross-rail price consistency | ~$0.01 |
+| P9    | Advanced Security  | SSRF (AWS/GCP/localhost/file://), timing attacks, CORS, header injection (CRLF/64KB/Host), fuzz (null bytes/unicode/JSON bomb/prototype pollution), response analysis (stack traces/headers) | $0 |
+| P10   | Resilience         | Brute force (50 keys), XFF bypass, SSL/TLS version + cipher + cert expiry, enumeration, error cascade | $0 |
+| P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load, latency p50/p95/p99, ramp-up (1→5→10→25) | $0 |
+| P12   | Provider Health    | 1 tool per provider → HEALTHY/DOWN/RATE_LIMITED + latency             | $0      |
+| P13   | Cache & Simulation | Cache isolation, cache leak test, User-Agent/Accept variation, REST+MCP simultaneous, error schema | $0 |
+| P14   | Discover Tools     | Category enumeration (21 cats), category+task combos, stemming, keyword relevance, abuse (SQLi/XSS/unicode/10k chars), truncation, performance | $0 |
+| P15   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
 
 **Total estimated cost:** ~$0.07 per full run.
 
 ## Environment Variables
 
-| Variable          | Required | Default                    | Description                          |
-|-------------------|----------|----------------------------|--------------------------------------|
-| `API_BASE_URL`    | Yes      | `https://apibase.pro`      | Target server base URL               |
-| `MCP_SERVER_URL`  | No       | `{API_BASE_URL}/mcp`       | MCP endpoint URL                     |
-| `API_KEY`         | No       | (none)                     | API key for authenticated requests   |
-| `PRIVATE_KEY`     | No*      | (none)                     | Wallet private key for payments      |
-| `CONCURRENCY`     | No       | `5`                        | Parallel requests in load test       |
-| `SKIP_PAYMENTS`   | No       | `false`                    | Skip real payment tests              |
-| `PHASES`          | No       | `0,1,2,3,4,5,6,7,8,9`     | Comma-separated phase numbers        |
-| `MAX_TOOLS`       | No       | `0` (all)                  | Max tools to test (0 = unlimited)    |
-| `TIMEOUT_MS`      | No       | `30000`                    | Per-request timeout in ms            |
-| `MAX_USDC_BUDGET` | No       | `0.25`                     | Spending cap per protocol            |
+| Variable          | Required | Default                             | Description                          |
+|-------------------|----------|-------------------------------------|--------------------------------------|
+| `API_BASE_URL`    | Yes      | `https://apibase.pro`               | Target server base URL               |
+| `MCP_SERVER_URL`  | No       | `{API_BASE_URL}/mcp`                | MCP endpoint URL                     |
+| `API_KEY`         | No       | (none)                              | API key for authenticated requests   |
+| `PRIVATE_KEY`     | No*      | (none)                              | Wallet private key for payments      |
+| `CONCURRENCY`     | No       | `5`                                 | Parallel requests in load test       |
+| `SKIP_PAYMENTS`   | No       | `false`                             | Skip real payment tests              |
+| `PHASES`          | No       | `0,1,2,...,15` (all)                | Comma-separated phase numbers        |
+| `MAX_TOOLS`       | No       | `0` (all)                           | Max tools to test (0 = unlimited)    |
+| `TIMEOUT_MS`      | No       | `30000`                             | Per-request timeout in ms            |
+| `MAX_USDC_BUDGET` | No       | `0.25`                              | Spending cap per protocol            |
 
-> \* `PRIVATE_KEY` is required only for payment phases (P5, P6). The same key works on both Base and Tempo chains.
+> \* `PRIVATE_KEY` is required only for payment phases (P5, P6, P8). The same key works on both Base and Tempo chains.
 
 ## Testing Your Own MCP Server
 
@@ -131,17 +133,20 @@ CONCURRENCY=10 npm test
 
 ### Minimum server requirements for each phase:
 
-| Phase | Server must support                                      |
-|-------|----------------------------------------------------------|
-| P0    | `GET /api/v1/tools` + `/.well-known/mcp.json`           |
-| P1    | `GET /health/ready`                                      |
-| P2    | HTTP 402 with `WWW-Authenticate: Payment` header         |
-| P3    | HTTP 402 with x402 JSON body                             |
-| P4    | MCP Streamable HTTP (POST /mcp)                          |
-| P5    | MPP payment verification via `mppx`                      |
-| P6    | x402 payment verification via `@x402/core`               |
-| P7    | Standard REST API (any MCP server)                       |
-| P8    | Any HTTP endpoint                                        |
+| Phase | Server must support                                                           |
+|-------|-------------------------------------------------------------------------------|
+| P0    | `GET /api/v1/tools` + `/.well-known/mcp.json`                                |
+| P1    | `GET /health/ready`                                                           |
+| P2    | HTTP 402 with `WWW-Authenticate: Payment` header                              |
+| P3    | HTTP 402 with x402 JSON body (`x402Version: 2`, `accepts` array)              |
+| P4    | MCP Streamable HTTP (`POST /mcp`) with initialize, tools/list, tools/call     |
+| P5    | MPP payment verification via `mppx`                                           |
+| P6    | x402 payment verification via `@x402/core`                                    |
+| P7-P10| Standard REST API (any MCP server)                                            |
+| P11   | Any HTTP endpoint                                                             |
+| P12   | `POST /api/v1/tools/{id}/call`                                                |
+| P13   | REST + MCP endpoints                                                          |
+| P14   | MCP `prompts/get` with `discover_tools` prompt                                |
 
 ## Reports
 
@@ -154,12 +159,12 @@ Reports are saved to `reports/` directory (git-ignored). Each run creates:
 
 ```json
 {
-  "timestamp": "2026-03-25T09:00:00.000Z",
+  "timestamp": "2026-03-27T09:00:00.000Z",
   "server": "https://apibase.pro",
   "score": 85,
   "grade": "B",
-  "assertions": { "total": 332, "pass": 323, "fail": 9 },
-  "financial": { "x402": 0.001, "mpp": 0.002 },
+  "assertions": { "total": 700, "pass": 680, "fail": 20 },
+  "financial": { "x402": 0.05, "mpp": 0.01 },
   "errors": [],
   "recommendations": [],
   "failures": []
@@ -170,13 +175,17 @@ Reports are saved to `reports/` directory (git-ignored). Each run creates:
 
 ### x402 (USDC on Base)
 
-Standard HTTP 402 payment protocol. Client sends request, gets 402 with payment requirements, signs USDC transfer on Base chain, retries with `X-Payment` + `PAYMENT-SIGNATURE` headers.
+Standard HTTP 402 payment protocol. Client sends request, gets 402 with payment requirements (`accepts` array with `network`, `asset`, `payTo`, `scheme`, `amount`), signs USDC transfer on Base chain, retries with `X-Payment` + `PAYMENT-SIGNATURE` headers.
+
+**Validation:** P3 checks every tool's 402 response for correct `payTo` address, `network` (eip155:8453), `asset` (USDC contract), and reasonable `amount`. Multi-accept entries are all validated.
 
 ### MPP (USDC on Tempo)
 
-Machine Payments Protocol by Stripe/Tempo. Client sends request, gets 402 with `WWW-Authenticate: Payment` header, signs payment on Tempo chain via `mppx` SDK, retries with `Authorization: Payment <credential>`.
+Machine Payments Protocol by Stripe/Tempo. Client sends request, gets 402 with `WWW-Authenticate: Payment` header containing challenge (id, realm, method, intent, request, expires), signs payment on Tempo chain via `mppx` SDK, retries with `Authorization: Payment <credential>`.
 
-Both protocols can coexist on the same server — this tester verifies both work correctly.
+**Validation:** P2 checks every tool for correct `recipient`, `chainId` (4217), and reasonable `amount`. P8 validates cross-rail price consistency (x402 vs MPP amounts must match).
+
+Both protocols can coexist on the same server — this tester verifies both work correctly and consistently.
 
 ## Security
 
@@ -193,24 +202,22 @@ Both protocols can coexist on the same server — this tester verifies both work
 | **No telemetry** | By design | Zero analytics, zero tracking, zero external calls except target server |
 | **Open source** | MIT license | Full source code available for audit |
 
-### Automated security pipeline
+### What this tool tests on YOUR server
 
-Every push and PR runs these checks automatically via GitHub Actions:
-
-1. **Secret Detection** — TruffleHog + Gitleaks scan entire git history for leaked keys
-2. **CodeQL Analysis** — GitHub's static analysis engine checks for JavaScript vulnerabilities
-3. **Dependency Audit** — npm audit + Snyk scan for known CVEs in dependencies
-4. **No Hardcoded Secrets** — Custom grep for private keys (0x...), API keys (ak_live_...), GitHub tokens (ghp_...)
-5. **No Data Exfiltration** — Scan for eval(), child_process, suspicious HTTP calls, base64-encoded env vars
-6. **Code Quality** — Syntax check all source files, check for secret logging
-
-### What this tool does NOT do
-
-- Does NOT send your private keys anywhere (keys are used locally by viem/mppx for signing)
-- Does NOT store or cache payment credentials
-- Does NOT make HTTP calls to any server except the one you configure in `API_BASE_URL`
-- Does NOT collect analytics, telemetry, or usage data
-- Does NOT require internet access except to reach your target MCP server
+| Category | Tests | What it looks for |
+|----------|-------|-------------------|
+| **Payment Replay** | 5 | Reused payment signatures (same tool, cross-tool, modified body) |
+| **Double-Spend** | 1 | 10 parallel requests with same payment → max 1 success |
+| **Amount Manipulation** | 5 | Zero, negative, underpay, tampered payTo, float precision |
+| **SSRF** | 4 | AWS/GCP metadata, localhost, file:// protocol via URL-accepting tools |
+| **Timing Attacks** | 2 | Valid vs invalid key timing differential |
+| **CORS** | 3 | Evil origin reflection, null origin, preflight with credentials |
+| **Header Injection** | 3 | CRLF in auth, 64KB header, Host override |
+| **Fuzz** | 5 | Null bytes, unicode, JSON bomb, prototype pollution, MAX_SAFE_INTEGER |
+| **Brute Force** | 3 | 50 random keys, XFF bypass, lockout recovery |
+| **SSL/TLS** | 3 | Protocol version, cipher strength, certificate expiry |
+| **Enumeration** | 3 | Uniform errors, hidden endpoints, tool ID injection |
+| **Response Analysis** | 3 | Stack trace leaks, X-Powered-By, Server header |
 
 ### Verify yourself
 
@@ -238,37 +245,46 @@ See [docs/SECURITY.md](docs/SECURITY.md) for details on what the security test p
 ```
 mcp-protocol-tester/
 ├── src/
-│   ├── index.js              # Main entry point / CLI
+│   ├── index.js                   # Main entry point / CLI
 │   ├── phases/
-│   │   ├── 00-discovery.js   # P0: Catalog, MCP config, server card
-│   │   ├── 01-infrastructure.js  # P1: Health, RPC, wallets
-│   │   ├── 02-mpp-challenges.js  # P2: MPP 402 on all tools
-│   │   ├── 03-x402-challenges.js # P3: x402 402 on all tools
-│   │   ├── 04-mcp-protocol.js    # P4: MCP initialize/list/call
-│   │   ├── 05-mpp-payments.js    # P5: Real MPP payments
-│   │   ├── 06-x402-payments.js   # P6: Real x402 payments
-│   │   ├── 07-security.js        # P7: Security audit
-│   │   ├── 08-load.js            # P8: Load/stress test
-│   │   └── 09-report.js          # P9: Report generation
+│   │   ├── 00-discovery.js        # P0: Catalog, schema validation, .well-known, dual-rail
+│   │   ├── 01-infrastructure.js   # P1: Health, RPC, USDC + gas balances
+│   │   ├── 02-mpp-challenges.js   # P2: MPP 402 + field validation (recipient, chainId)
+│   │   ├── 03-x402-challenges.js  # P3: x402 402 + field validation (payTo, network, asset)
+│   │   ├── 04-mcp-protocol.js     # P4: MCP init/list/call + resources + prompts + version
+│   │   ├── 05-mpp-payments.js     # P5: Real MPP payments + response validation
+│   │   ├── 06-x402-payments.js    # P6: Real x402 payments + response validation
+│   │   ├── 07-security.js         # P7: Auth, credentials, HTTP methods, Content-Type
+│   │   ├── 08-payment-security.js # P8: Replay, race, double-spend, amounts, cross-rail
+│   │   ├── 09-advanced-security.js# P9: SSRF, timing, CORS, headers, fuzz, response
+│   │   ├── 10-resilience.js       # P10: Brute force, TLS cipher/cert, enumeration
+│   │   ├── 11-load.js             # P11: Concurrent, sustained, percentiles, ramp-up
+│   │   ├── 12-provider-health.js  # P12: Per-provider health map
+│   │   ├── 13-cache-simulation.js # P13: Cache leak, User-Agent, REST+MCP, errors
+│   │   ├── 14-discover-tools.js   # P14: Categories, stemming, relevance, abuse
+│   │   └── 15-report.js           # P15: Grade, breakdown, export
 │   ├── lib/
-│   │   ├── config.js         # Environment config loader
-│   │   ├── http.js           # HTTP client with timeout
-│   │   ├── mpp-client.js     # MPP payment wrapper
-│   │   ├── x402-client.js    # x402 payment wrapper
-│   │   ├── mcp-client.js     # MCP session handler
-│   │   ├── scoring.js        # Score calculation
-│   │   └── reporter.js       # Report formatter
+│   │   ├── config.js              # dotenv + env loader
+│   │   ├── http.js                # HTTP client with timeout + provider delays
+│   │   ├── mpp-client.js          # MPP payment wrapper (mppx)
+│   │   ├── x402-client.js         # x402 payment wrapper (@x402/core)
+│   │   ├── mcp-client.js          # MCP JSON-RPC session handler
+│   │   ├── scoring.js             # Score/grade calculator
+│   │   └── reporter.js            # Report formatter (txt + json) + weights
 │   └── utils/
-│       └── assert.js         # Test helpers, body builders
-├── reports/                  # Generated reports (git-ignored)
+│       └── assert.js              # Body builders (30+ heuristics), 70+ known params
+├── reports/                       # Generated reports (git-ignored)
 ├── docs/
-│   ├── SCORING.md            # Scoring methodology
-│   ├── ADDING-PHASES.md      # How to add test phases
-│   └── SECURITY.md           # Security test details
-├── .env.example              # Template (no real keys)
+│   ├── SCORING.md                 # Scoring methodology
+│   ├── ADDING-PHASES.md           # How to add test phases
+│   └── SECURITY.md                # Security test details
+├── .github/workflows/
+│   ├── security-audit.yml         # TruffleHog + Gitleaks + CodeQL + Snyk + custom scans
+│   └── ci.yml                     # Syntax check + dry run on Node 18/20/22
+├── .env.example                   # Template (no real keys)
 ├── .gitignore
 ├── package.json
-├── LICENSE                   # MIT
+├── LICENSE                        # MIT
 └── README.md
 ```
 
