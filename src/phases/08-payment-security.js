@@ -332,5 +332,33 @@ module.exports = async function phase8(scorer, config, context) {
       e.message.slice(0, 100));
   }
 
+  // ========================================================================
+  // 8.X — Cross-rail price consistency
+  // ========================================================================
+  console.log('  8.X Cross-rail price consistency...');
+  const probePrice = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
+    body: '{}',
+  });
+  if (probePrice.status === 402) {
+    const wwwAuth = probePrice.headers?.get?.('www-authenticate') || '';
+    let body402 = {}; try { body402 = await probePrice.json(); } catch {}
+    const x402Amount = body402.accepts?.[0]?.amount;
+    // Parse MPP amount from challenge
+    let mppAmount = null;
+    const mppMatch = wwwAuth.match(/request="([^"]+)"/);
+    if (mppMatch) {
+      try {
+        let b64 = mppMatch[1]; while (b64.length % 4) b64 += '=';
+        const decoded = JSON.parse(Buffer.from(b64, 'base64').toString());
+        mppAmount = decoded.amount;
+      } catch {}
+    }
+    const match = x402Amount && mppAmount && x402Amount === mppAmount;
+    scorer.rec(PHASE, '8.X cross-rail prices', 'match', match ? 'match' : 'mismatch',
+      match || !mppAmount, `x402=${x402Amount} mpp=${mppAmount}`);
+  } else { await drain(probePrice); }
+
   console.log('  Payment security tests complete');
 };

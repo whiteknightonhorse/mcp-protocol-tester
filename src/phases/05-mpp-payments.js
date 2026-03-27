@@ -77,8 +77,10 @@ module.exports = async function phase5(scorer, config, context) {
         const costHeader = r.headers?.get?.('x-payment-cost') || '';
         const cost = parseFloat(costHeader) || 0;
         context.spentMPP += cost;
+        // Validate response has actual content
+        const hasData = body && (body.data !== undefined || Object.keys(body).length > 1);
         scorer.rec(PHASE, `mpp-pay-${id}`, 200, 200, true,
-          `cost=$${cost.toFixed(6)} total=$${context.spentMPP.toFixed(4)}`);
+          `cost=$${cost.toFixed(6)} data=${hasData ? 'yes' : 'EMPTY'}`);
       } else if (status === 402) {
         // mppx got 402 but silently failed to sign — SDK limitation, not server bug
         stats.failed++;

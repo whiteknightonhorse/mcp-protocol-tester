@@ -37,8 +37,9 @@ class Scorer {
       if (t.ok) bp[t.phase].pass++;
     }
     const pr = (id) => {
-      const p = bp[id] || { pass: 0, total: 1 };
-      return Math.min(1, p.pass / Math.max(p.total, 1));
+      const p = bp[id];
+      if (!p || p.total === 0) return 0; // skipped phases score 0, not 100%
+      return Math.min(1, p.pass / p.total);
     };
     const pts = weights.map(([id, wt]) => [id, Math.round(pr(id) * wt), wt]);
     const total = pts.reduce((s, [, v]) => s + v, 0);

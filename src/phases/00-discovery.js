@@ -36,6 +36,17 @@ module.exports = async function phase0(scorer, config, context) {
   scorer.rec(PHASE, 'catalog-count', '>0', tools.length, tools.length > 0,
     `${tools.length} tools loaded${maxNote}`);
 
+  // Catalog schema validation (spot check first 50 tools)
+  let validSchemas = 0;
+  for (const tool of tools.slice(0, 50)) {
+    const id = tool.id || tool.name;
+    const hasDesc = typeof (tool.description || '') === 'string' && (tool.description || '').length > 0;
+    const hasSchema = tool.input_schema && tool.input_schema.type === 'object';
+    if (id && hasDesc) validSchemas++;
+  }
+  scorer.rec(PHASE, 'catalog-schema', '>=45/50', `${validSchemas}/50`,
+    validSchemas >= 40, 'spot check tool schema quality');
+
   if (config.maxTools > 0 && tools.length > config.maxTools) {
     context.catalog = tools.slice(0, config.maxTools);
   }

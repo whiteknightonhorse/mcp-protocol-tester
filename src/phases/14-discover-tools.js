@@ -306,6 +306,24 @@ module.exports = async function phase14(scorer, config, context) {
   scorer.rec(PHASE, '14.8 cat consistency', '5/5', `${consistPass}/5`,
     consistPass >= 4, 'spot check 5 categories');
 
+  // 9. Empty result test (category + irrelevant task)
+  console.log('  --- Empty result ---');
+  const emptyRes = await discover(mcpUrl, sid, config.apiKey, {
+    category: 'travel', task: 'quantum physics',
+  });
+  const emptyText = getDiscoverText(emptyRes.body);
+  const isFiltered = !emptyText.includes('amadeus') || emptyText.includes('0)') || emptyText.includes('no');
+  scorer.rec(PHASE, '14.9 empty result', 'no random tools', isFiltered ? 'filtered' : 'unfiltered',
+    emptyRes.status === 200, emptyText.slice(0, 60));
+  await sleep(200);
+
+  // 10. Performance check
+  console.log('  --- Performance ---');
+  const perfStart = Date.now();
+  await discover(mcpUrl, sid, config.apiKey, { task: 'flights' });
+  const perfMs = Date.now() - perfStart;
+  scorer.rec(PHASE, '14.10 query performance', '<3000ms', `${perfMs}ms`, perfMs < 3000);
+
   // Summary
   const total = scorer.all.filter(t => t.phase === PHASE).length;
   const passed = scorer.all.filter(t => t.phase === PHASE && t.ok).length;

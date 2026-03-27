@@ -1,22 +1,14 @@
 /**
- * Phase 9 — Report Generation
- * Computes final grade and calls generateReport from lib/reporter.js.
- * This phase is typically called from index.js directly, but can also
- * be invoked as a standalone phase.
+ * Phase 15 — Report Generation
+ * Computes final grade and displays summary.
+ * Weights are defined in lib/reporter.js (single source of truth).
  */
-const { generateReport } = require('../lib/reporter');
+const { generateReport, WEIGHTS } = require('../lib/reporter');
 
 const PHASE = 'P15';
 
-const WEIGHTS = [
-  ['P0', 6], ['P1', 6], ['P2', 6], ['P3', 6], ['P4', 6],
-  ['P5', 6], ['P6', 6], ['P7', 6], ['P8', 9], ['P9', 7],
-  ['P10', 6], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 6],
-  ['P15', 4],
-];
-
-module.exports = async function phase9(scorer, config, context) {
-  console.log('\n--- Phase 9: Report ---');
+module.exports = async function phase15(scorer, config, context) {
+  console.log('\n--- Phase 15: Report ---');
 
   const meta = {
     serverUrl: config.apiBaseUrl,

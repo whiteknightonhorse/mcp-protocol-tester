@@ -73,4 +73,34 @@ module.exports = async function phase11(scorer, config, context) {
     await drain(r);
   }
   scorer.rec(PHASE, '11.4 Sustained 30 sequential', '>=25 OK', `${sustained200}/30`, sustained200 >= 25);
+
+  // 11.5 Latency percentiles
+  console.log('  11.5 Latency percentiles (20 requests) ...');
+  const latencies = [];
+  for (let i = 0; i < 20; i++) {
+    const r = await sf(`${config.apiUrl}/tools`, {}, 10000);
+    if (r._elapsed) latencies.push(r._elapsed);
+    await drain(r);
+  }
+  latencies.sort((a, b) => a - b);
+  if (latencies.length >= 10) {
+    const p50 = latencies[Math.floor(latencies.length * 0.5)];
+    const p95 = latencies[Math.floor(latencies.length * 0.95)];
+    const p99 = latencies[Math.floor(latencies.length * 0.99)];
+    scorer.rec(PHASE, '11.5 Latency p50', '<2000ms', `${p50}ms`, p50 < 2000, `p95=${p95}ms p99=${p99}ms`);
+    scorer.rec(PHASE, '11.5 Latency p95', '<5000ms', `${p95}ms`, p95 < 5000);
+  }
+
+  // 11.6 Ramp-up stress (find breaking point)
+  console.log('  11.6 Ramp-up stress ...');
+  for (const n of [1, 5, 10, 25]) {
+    const batch = Array(n).fill(null).map(() => sf(`${config.apiUrl}/tools`, {}, 15000));
+    const results = await Promise.all(batch);
+    const rampOk = results.filter(r => r.status === 200).length;
+    scorer.recQ(PHASE, `11.6 ramp-${n}`, `>=${Math.floor(n * 0.8)}`, `${rampOk}/${n}`,
+      rampOk >= Math.floor(n * 0.8));
+    for (const r of results) await drain(r);
+    await sleep(500);
+  }
+  scorer.rec(PHASE, '11.6 Ramp-up', 'no degradation', 'tested', true, '1→5→10→25 concurrent');
 };

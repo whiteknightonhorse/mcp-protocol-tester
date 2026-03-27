@@ -66,8 +66,11 @@ async function main() {
   console.log(`  x402 wallet: ${x402ok ? getWalletAddress() : 'NONE'}`);
   console.log(`  MPP client:  ${mppok ? 'ready' : 'NONE'}\n`);
 
-  // Run phases (P0-P13)
-  if (config.phaseEnabled(0))  await phase0(scorer, config, context);
+  // Phase 0 always runs (other phases depend on context.catalog)
+  await phase0(scorer, config, context);
+  if (context.catalog.length === 0) {
+    console.log('\n  WARNING: catalog is empty — subsequent phases may produce misleading results\n');
+  }
   if (config.phaseEnabled(1))  await phase1(scorer, config, context);
   if (config.phaseEnabled(2))  await phase2(scorer, config, context);
   if (config.phaseEnabled(3))  await phase3(scorer, config, context);

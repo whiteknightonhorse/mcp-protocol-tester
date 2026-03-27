@@ -7,6 +7,7 @@ const { sf, drain } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
 
 const PHASE = 'P7';
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function expectStatus(scorer, name, expected, actual, det = '') {
   const ok = Array.isArray(expected)
@@ -110,6 +111,46 @@ module.exports = async function phase7(scorer, config, context) {
   expectStatus(scorer, 'sql-injection-tool-id', [400, 404, 422], r12.status,
     sqliSafe ? 'properly rejected' : 'SUSPICIOUS response');
   await drain(r12);
+
+  // 13. HTTP method enforcement
+  const AUTH = { 'Content-Type': 'application/json' };
+  if (config.apiKey) AUTH['Authorization'] = `Bearer ${config.apiKey}`;
+
+  for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) {
+    const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method, headers: AUTH,
+    });
+    scorer.rec(PHASE, `7.X ${method} method`, '405|400', r.status,
+      r.status === 405 || r.status === 400 || r.status === 404,
+      r.status === 200 ? 'BUG: should reject non-POST' : 'rejected');
+    await drain(r); await sleep(200);
+  }
+
+  // 14. Content-Type manipulation
+  for (const [label, ct] of [
+    ['text/xml', 'text/xml'],
+    ['form-urlencoded', 'application/x-www-form-urlencoded'],
+    ['no content-type', ''],
+  ]) {
+    const hdrs = {};
+    if (config.apiKey) hdrs['Authorization'] = `Bearer ${config.apiKey}`;
+    if (ct) hdrs['Content-Type'] = ct;
+    const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: hdrs, body: '{}',
+    });
+    scorer.rec(PHASE, `7.X CT:${label}`, '!500', r.status,
+      r.status !== 500, `status=${r.status}`);
+    await drain(r); await sleep(200);
+  }
+
+  // 15. Request ID header
+  const ridRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST', headers: AUTH, body: '{}',
+  });
+  const requestId = ridRes.headers?.get?.('x-request-id') || '';
+  scorer.rec(PHASE, '7.X Request-ID header', 'present', requestId ? 'yes' : 'no',
+    requestId.length > 0, requestId.slice(0, 40));
+  await drain(ridRes);
 
   console.log('  Security tests complete');
 };

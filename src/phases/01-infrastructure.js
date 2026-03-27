@@ -83,6 +83,45 @@ module.exports = async function phase1(scorer, config, context) {
     context.balBase = Number(baseRaw) / 1e6;
     scorer.rec(PHASE, 'balance-base-usdc', '>0', context.balBase.toFixed(4),
       context.balBase > 0, `${context.balBase.toFixed(4)} USDC on Base`);
+
+    // Gas balance check (Tempo)
+    try {
+      const gasTempoRes = await sf(TEMPO_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getBalance', params: [walletAddr, 'latest'], id: 3 }),
+      }, 10000);
+      const gasTempoJson = await gasTempoRes.json();
+      const gasTempoRaw = gasTempoJson.result && gasTempoJson.result !== '0x'
+        ? BigInt(gasTempoJson.result) : 0n;
+      context.gasBalTempo = Number(gasTempoRaw) / 1e18;
+      scorer.rec(PHASE, 'gas-balance-tempo', '>0', context.gasBalTempo.toFixed(6),
+        context.gasBalTempo > 0,
+        `${context.gasBalTempo.toFixed(6)} native on Tempo (used for gas)`);
+    } catch (e) {
+      context.gasBalTempo = 0;
+      scorer.rec(PHASE, 'gas-balance-tempo', '>0', 'error', false, `RPC error: ${e.message}`);
+    }
+
+    // Gas balance check (Base — ETH)
+    try {
+      const baseRpcUrl = 'https://mainnet.base.org';
+      const gasBaseRes = await sf(baseRpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getBalance', params: [walletAddr, 'latest'], id: 4 }),
+      }, 10000);
+      const gasBaseJson = await gasBaseRes.json();
+      const gasBaseRaw = gasBaseJson.result && gasBaseJson.result !== '0x'
+        ? BigInt(gasBaseJson.result) : 0n;
+      context.gasBalBase = Number(gasBaseRaw) / 1e18;
+      scorer.rec(PHASE, 'gas-balance-base', '>0', context.gasBalBase.toFixed(6),
+        context.gasBalBase > 0,
+        `${context.gasBalBase.toFixed(6)} ETH on Base (used for gas)`);
+    } catch (e) {
+      context.gasBalBase = 0;
+      scorer.rec(PHASE, 'gas-balance-base', '>0', 'error', false, `RPC error: ${e.message}`);
+    }
   } else {
     scorer.rec(PHASE, 'balance-tempo-usdc', '>0', 'no-key', false, 'no private key');
     scorer.rec(PHASE, 'balance-base-usdc', '>0', 'no-key', false, 'no private key');
@@ -103,5 +142,6 @@ module.exports = async function phase1(scorer, config, context) {
   scorer.rec(PHASE, 'facilitator', 200, fr.status, fOk, facilitatorInfo);
 
   console.log(`  Wallet: ${walletAddr || 'none'}`);
-  console.log(`  Balances — Tempo: ${context.balTempo.toFixed(4)} USDC | Base: ${context.balBase.toFixed(4)} USDC`);
+  console.log(`  Balances — Tempo: ${(context.balTempo || 0).toFixed(4)} USDC | Base: ${(context.balBase || 0).toFixed(4)} USDC`);
+  console.log(`  Gas — Tempo: ${(context.gasBalTempo || 0).toFixed(6)} native | Base: ${(context.gasBalBase || 0).toFixed(6)} ETH`);
 };

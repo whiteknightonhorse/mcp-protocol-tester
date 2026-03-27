@@ -10,7 +10,8 @@ async function sf(url, opts = {}, tmo = 25000) {
   } catch (e) {
     clearTimeout(t);
     return {
-      status: 'TMO', _elapsed: Date.now() - start, ok: false,
+      status: 0, statusText: 'TMO', _elapsed: Date.now() - start, ok: false,
+      _timeout: true,
       text: async () => e.message, json: async () => ({}),
       headers: new Headers(),
     };

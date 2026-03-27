@@ -68,6 +68,31 @@ module.exports = async function phase2(scorer, config, context) {
         stats.validChallenge++;
         scorer.recQ(PHASE, `mpp-${id}`, '402+header', '402+header', true,
           `method=${parsed.method || 'n/a'}`);
+
+        // Challenge field validation
+        if (parsed.decoded) {
+          const EXPECTED_RECIPIENT = '0x183fFa1335EB66858EebCb86F651f70632821f8d';
+          const recipient = parsed.decoded.recipient;
+          if (recipient && recipient.toLowerCase() !== EXPECTED_RECIPIENT.toLowerCase()) {
+            scorer.addRec('SECURITY',
+              `${PHASE} mpp-${id}: unexpected recipient`,
+              `expected=${EXPECTED_RECIPIENT} got=${recipient} — verify server payment recipient address`);
+          }
+
+          const amount = Number(parsed.decoded.amount);
+          if (isNaN(amount) || amount <= 0 || amount >= 1000000) {
+            scorer.addRec('SECURITY',
+              `${PHASE} mpp-${id}: suspicious amount`,
+              `amount=${parsed.decoded.amount} (expected >0 and <1000000 micro-USDC)`);
+          }
+
+          const chainId = parsed.decoded.methodDetails?.chainId;
+          if (chainId !== undefined && Number(chainId) !== 4217) {
+            scorer.addRec('SECURITY',
+              `${PHASE} mpp-${id}: unexpected chainId`,
+              `expected=4217 got=${chainId} — verify challenge targets Tempo mainnet`);
+          }
+        }
       } else {
         scorer.recQ(PHASE, `mpp-${id}`, 'valid-challenge', 'unparseable', false,
           `raw: ${wwwAuth.slice(0, 80)}`);

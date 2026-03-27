@@ -79,6 +79,68 @@ module.exports = async function phase3(scorer, config, context) {
         stats.correct402++;
         scorer.recQ(PHASE, `x402-${id}`, 'valid-x402', 'valid', true,
           `scheme=${first.scheme} net=${first.network} amount=${first.amount || first.maxAmountRequired}`);
+
+        // x402 field validation
+        const EXPECTED_PAYTO = '0x50EbDa9dA5dC19c302Ca059d7B9E06e264936480';
+        const EXPECTED_NETWORK = 'eip155:8453';
+        const EXPECTED_ASSET = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+
+        if (first.payTo && first.payTo.toLowerCase() !== EXPECTED_PAYTO.toLowerCase()) {
+          scorer.addRec('SECURITY',
+            `${PHASE} x402-${id}: unexpected payTo`,
+            `expected=${EXPECTED_PAYTO} got=${first.payTo} — verify server payment recipient address`);
+        }
+        if (first.network !== EXPECTED_NETWORK) {
+          scorer.addRec('SECURITY',
+            `${PHASE} x402-${id}: unexpected network`,
+            `expected=${EXPECTED_NETWORK} got=${first.network} — verify challenge targets Base network`);
+        }
+        if (first.asset && first.asset.toLowerCase() !== EXPECTED_ASSET.toLowerCase()) {
+          scorer.addRec('SECURITY',
+            `${PHASE} x402-${id}: unexpected asset`,
+            `expected=${EXPECTED_ASSET} got=${first.asset} — verify challenge requests USDC payment`);
+        }
+        if (first.scheme !== 'exact') {
+          scorer.addRec('SECURITY',
+            `${PHASE} x402-${id}: unexpected scheme`,
+            `expected=exact got=${first.scheme} — verify payment scheme`);
+        }
+
+        const firstAmount = Number(first.amount || first.maxAmountRequired);
+        if (isNaN(firstAmount) || firstAmount <= 0 || firstAmount >= 1000000) {
+          scorer.addRec('SECURITY',
+            `${PHASE} x402-${id}: suspicious amount`,
+            `amount=${first.amount || first.maxAmountRequired} (expected >0 and <1000000)`);
+        }
+
+        // Validate all accept entries if multiple
+        if (accepts.length > 1) {
+          for (let i = 1; i < accepts.length; i++) {
+            const entry = accepts[i];
+            if (!validateAccept(entry)) {
+              scorer.addRec('SECURITY',
+                `${PHASE} x402-${id}: invalid accepts[${i}]`,
+                `missing required fields in accept entry ${i}`);
+              continue;
+            }
+            if (entry.payTo && entry.payTo.toLowerCase() !== EXPECTED_PAYTO.toLowerCase()) {
+              scorer.addRec('SECURITY',
+                `${PHASE} x402-${id}: accepts[${i}] unexpected payTo`,
+                `expected=${EXPECTED_PAYTO} got=${entry.payTo}`);
+            }
+            if (entry.asset && entry.asset.toLowerCase() !== EXPECTED_ASSET.toLowerCase()) {
+              scorer.addRec('SECURITY',
+                `${PHASE} x402-${id}: accepts[${i}] unexpected asset`,
+                `expected=${EXPECTED_ASSET} got=${entry.asset}`);
+            }
+            const entryAmount = Number(entry.amount || entry.maxAmountRequired);
+            if (isNaN(entryAmount) || entryAmount <= 0 || entryAmount >= 1000000) {
+              scorer.addRec('SECURITY',
+                `${PHASE} x402-${id}: accepts[${i}] suspicious amount`,
+                `amount=${entry.amount || entry.maxAmountRequired}`);
+            }
+          }
+        }
       } else {
         stats.badSchema++;
         scorer.recQ(PHASE, `x402-${id}`, 'valid-x402', 'bad-schema', false,

@@ -134,13 +134,15 @@ module.exports = async function phase10(scorer, config, context) {
   const port = new URL(config.apiBaseUrl).port || 443;
 
   try {
-    const tlsResult = await new Promise((resolve, reject) => {
+    const tlsInfo = await new Promise((resolve, reject) => {
       const socket = tls.connect(
         { host: hostname, port: Number(port), servername: hostname, rejectUnauthorized: true },
         () => {
           const proto = socket.getProtocol();
+          const cipher = socket.getCipher();
+          const cert = socket.getPeerCertificate();
           socket.destroy();
-          resolve(proto);
+          resolve({ proto, cipher, cert });
         }
       );
       socket.setTimeout(10000);
@@ -148,9 +150,24 @@ module.exports = async function phase10(scorer, config, context) {
       socket.on('error', (e) => reject(e));
     });
 
-    const tlsOk = tlsResult === 'TLSv1.2' || tlsResult === 'TLSv1.3';
-    scorer.rec(PHASE, '10.2 TLS-version', 'TLSv1.2+', tlsResult, tlsOk,
+    const tlsOk = tlsInfo.proto === 'TLSv1.2' || tlsInfo.proto === 'TLSv1.3';
+    scorer.rec(PHASE, '10.2 TLS-version', 'TLSv1.2+', tlsInfo.proto, tlsOk,
       tlsOk ? 'modern TLS' : 'outdated TLS version');
+
+    // Cipher suite check
+    const cipherName = tlsInfo.cipher?.name || '';
+    const weakCiphers = ['RC4', 'DES', '3DES', 'MD5', 'NULL', 'EXPORT'];
+    const isWeak = weakCiphers.some(w => cipherName.toUpperCase().includes(w));
+    scorer.rec(PHASE, '10.2b TLS cipher', 'strong', cipherName,
+      !isWeak, isWeak ? 'WEAK cipher detected!' : 'strong cipher');
+
+    // Certificate expiry check
+    if (tlsInfo.cert?.valid_to) {
+      const expiry = new Date(tlsInfo.cert.valid_to);
+      const daysLeft = Math.floor((expiry - Date.now()) / 86400000);
+      scorer.rec(PHASE, '10.2c TLS cert expiry', '>30 days', `${daysLeft} days`,
+        daysLeft > 30, daysLeft <= 30 ? 'EXPIRING SOON' : `expires ${tlsInfo.cert.valid_to}`);
+    }
   } catch (e) {
     scorer.rec(PHASE, '10.2 TLS-version', 'TLSv1.2+', 'error', false,
       e.message.slice(0, 100));

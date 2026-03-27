@@ -1,5 +1,7 @@
 const { sf, drain } = require('./http');
 
+let _rpcId = 1;
+
 async function mcpRequest(url, method, params, sid, apiKey) {
   const headers = {
     'Content-Type': 'application/json',
@@ -13,7 +15,7 @@ async function mcpRequest(url, method, params, sid, apiKey) {
     headers,
     body: JSON.stringify({
       jsonrpc: '2.0',
-      id: Math.floor(Math.random() * 10000),
+      id: _rpcId++,
       method,
       params: params || {},
     }),

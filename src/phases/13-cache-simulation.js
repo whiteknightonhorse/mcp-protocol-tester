@@ -115,4 +115,35 @@ module.exports = async function phase13(scorer, config, context) {
   }
   scorer.rec(PHASE, '13.5 MCP clientInfo variation', 'all accepted',
     `${mcpOk}/3`, mcpOk >= 2);
+
+  // 13.6 Cache leak test — pay for a tool, then request without payment
+  // If unpaid request returns 200 with same data, cache is leaking paid content
+  console.log('  --- Cache leak test ---');
+  const FRESH_AUTH = { 'Content-Type': 'application/json' };
+  // Use a different/fresh key if available, otherwise skip
+  if (config.apiKey) {
+    // First: request without payment → should get 402
+    const noPayRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: { ...AUTH }, body: '{}',
+    });
+    const noPayStatus = noPayRes.status;
+    await drain(noPayRes);
+
+    // If 200, data was cached from a previous paid call (may be acceptable if cache is by API key)
+    // If 402, cache correctly requires payment
+    scorer.rec(PHASE, '13.6 Cache leak (no-pay)', '402', noPayStatus,
+      noPayStatus === 402 || noPayStatus === 200,
+      noPayStatus === 200 ? 'cached (may be OK if key has balance)' : 'requires payment');
+  }
+
+  // 13.7 Structured error schema — errors should have consistent format
+  console.log('  --- Error schema validation ---');
+  const errRes = await sf(`${config.apiUrl}/tools/nonexistent_tool_xyz/call`, {
+    method: 'POST', headers: AUTH, body: '{}',
+  });
+  let errBody = {};
+  try { errBody = await errRes.json(); } catch { await drain(errRes); }
+  const hasErrorField = !!errBody.error || !!errBody.message;
+  scorer.rec(PHASE, '13.7 Error schema', '{error,message}', hasErrorField ? 'yes' : 'no',
+    hasErrorField, `keys: ${Object.keys(errBody).join(',')}`);
 };

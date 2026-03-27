@@ -1,6 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 
+// Single source of truth for phase weights
+const WEIGHTS = [
+  ['P0', 6], ['P1', 6], ['P2', 6], ['P3', 6], ['P4', 6],
+  ['P5', 6], ['P6', 6], ['P7', 6], ['P8', 9], ['P9', 7],
+  ['P10', 6], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 6],
+  ['P15', 4],
+];
+
 function generateReport(scorer, meta) {
   const L = [];
   const w = (s) => { L.push(s); console.log(s); };
@@ -13,14 +21,7 @@ function generateReport(scorer, meta) {
   w('  ' + ts);
   w('='.repeat(76));
 
-  // Scoring — 16 phases
-  const weights = [
-    ['P0', 6], ['P1', 6], ['P2', 6], ['P3', 6], ['P4', 6],
-    ['P5', 6], ['P6', 6], ['P7', 6], ['P8', 9], ['P9', 7],
-    ['P10', 6], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 6],
-    ['P15', 4],
-  ];
-  const { pts, total, grade, bp } = scorer.computeGrade(weights);
+  const { pts, total, grade, bp } = scorer.computeGrade(WEIGHTS);
 
   w(`\nServer: ${meta.serverUrl} | Tools: ${meta.toolCount || '?'}`);
   w(`Assertions: ${scorer.all.length} | Pass: ${scorer.pass.length} | Fail: ${scorer.fail.length}`);
@@ -113,4 +114,4 @@ function generateReport(scorer, meta) {
   return { grade, total, txtFile, jsonFile };
 }
 
-module.exports = { generateReport };
+module.exports = { generateReport, WEIGHTS };
