@@ -13,7 +13,7 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 
 ## Features
 
-- **16-phase test suite** — 700+ assertions across discovery, payments, security, and load
+- **18-phase test suite** — 800+ assertions across discovery, payments, security, and agent UX
 - **Dual-rail payment testing** — x402 + MPP in parallel with cross-rail price validation
 - **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
 - **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
@@ -22,6 +22,8 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 - **Resilience testing** — brute force, SSL/TLS cipher/cert validation, enumeration, error cascade
 - **Load testing** — ramp-up stress, latency percentiles (p50/p95/p99), sustained load
 - **Tool discovery** — discover_tools prompt validation, stemming, category enumeration, abuse testing
+- **Platform features** — usage analytics, tool quality index, batch API, cross-feature validation
+- **Agent experience** — zero-knowledge bootstrap, description quality, error actionability, E2E lifecycle
 - **Provider health map** — per-provider status and latency tracking
 - **Universal** — works with ANY MCP server, not just APIbase
 - **Scoring** — 0-100 score with A+/A/B/C/D/F grade
@@ -83,7 +85,7 @@ CONCURRENCY=10 npm test
 
 > **Note:** Any CRITICAL (500) server error automatically caps the grade at D. Skipped phases score 0%.
 
-## Phases (16)
+## Phases (18)
 
 | Phase | Name               | What it tests                                                         | Cost    |
 |-------|--------------------|-----------------------------------------------------------------------|---------|
@@ -102,7 +104,9 @@ CONCURRENCY=10 npm test
 | P12   | Provider Health    | 1 tool per provider → HEALTHY/DOWN/RATE_LIMITED + latency             | $0      |
 | P13   | Cache & Simulation | Cache isolation, cache leak test, User-Agent/Accept variation, REST+MCP simultaneous, error schema | $0 |
 | P14   | Discover Tools     | Category enumeration (21 cats), category+task combos, stemming, keyword relevance, abuse (SQLi/XSS/unicode/10k chars), truncation, performance | $0 |
-| P15   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
+| P15   | Platform Features  | Usage Analytics (account.usage/tools/timeseries), Tool Quality Index (tool_quality/rankings), Batch API (call_batch + REST), cross-feature catalog/MCP/billing validation | $0 |
+| P16   | Agent Experience   | Zero-knowledge bootstrap, tool description quality, error actionability (400/402/429), payment UX, response consistency, E2E lifecycle (golden path), MCP protocol completeness | $0 |
+| P17   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
 
 **Total estimated cost:** ~$0.07 per full run.
 
@@ -147,6 +151,8 @@ CONCURRENCY=10 npm test
 | P12   | `POST /api/v1/tools/{id}/call`                                                |
 | P13   | REST + MCP endpoints                                                          |
 | P14   | MCP `prompts/get` with `discover_tools` prompt                                |
+| P15   | Platform tools: `account.usage`, `platform.tool_quality`, `platform.call_batch` |
+| P16   | `.well-known/*` discovery, MCP session, tool descriptions, error messages      |
 
 ## Reports
 
@@ -163,7 +169,7 @@ Reports are saved to `reports/` directory (git-ignored). Each run creates:
   "server": "https://apibase.pro",
   "score": 85,
   "grade": "B",
-  "assertions": { "total": 700, "pass": 680, "fail": 20 },
+  "assertions": { "total": 800, "pass": 770, "fail": 30 },
   "financial": { "x402": 0.05, "mpp": 0.01 },
   "errors": [],
   "recommendations": [],
@@ -262,7 +268,9 @@ mcp-protocol-tester/
 │   │   ├── 12-provider-health.js  # P12: Per-provider health map
 │   │   ├── 13-cache-simulation.js # P13: Cache leak, User-Agent, REST+MCP, errors
 │   │   ├── 14-discover-tools.js   # P14: Categories, stemming, relevance, abuse
-│   │   └── 15-report.js           # P15: Grade, breakdown, export
+│   │   ├── 16-platform-features.js# P15: Usage Analytics, Tool Quality, Batch API
+│   │   ├── 17-agent-experience.js # P16: Bootstrap, descriptions, errors, E2E lifecycle
+│   │   └── 15-report.js           # P17: Grade, breakdown, export
 │   ├── lib/
 │   │   ├── config.js              # dotenv + env loader
 │   │   ├── http.js                # HTTP client with timeout + provider delays
