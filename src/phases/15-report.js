@@ -5,10 +5,10 @@
  */
 const { generateReport, WEIGHTS } = require('../lib/reporter');
 
-const PHASE = 'P15';
+const PHASE = 'P17';
 
-module.exports = async function phase15(scorer, config, context) {
-  console.log('\n--- Phase 15: Report ---');
+module.exports = async function phase17(scorer, config, context) {
+  console.log('\n--- Phase 17: Report ---');
 
   const meta = {
     serverUrl: config.apiBaseUrl,
