@@ -183,7 +183,8 @@ module.exports = async function phase9(scorer, config, context) {
       headers: { Origin: 'https://evil.com' },
     });
     const acao = rCors.headers?.get?.('access-control-allow-origin') || '';
-    const ok = !acao.includes('evil.com');
+    // Check ACAO is not the attacker's origin (exact match, not substring)
+    const ok = acao !== 'https://evil.com' && acao !== 'http://evil.com';
     scorer.rec(PHASE, '9.3 CORS-evil-origin', '!evil.com', acao || '(none)', ok,
       'ACAO header must not reflect evil origin');
     await drain(rCors);
@@ -220,7 +221,8 @@ module.exports = async function phase9(scorer, config, context) {
     });
     const preAcao = rPre.headers?.get?.('access-control-allow-origin') || '';
     const preCreds = rPre.headers?.get?.('access-control-allow-credentials') || '';
-    const okPre = !(preAcao.includes('evil.com') && preCreds === 'true');
+    // Exact match — attacker's origin must not be reflected with credentials
+    const okPre = !((preAcao === 'https://evil.com' || preAcao === 'http://evil.com') && preCreds === 'true');
     scorer.rec(PHASE, '9.3 CORS-preflight', 'no evil+creds', okPre ? 'safe' : 'EXPOSED', okPre,
       `ACAO=${preAcao} creds=${preCreds}`);
     await drain(rPre);

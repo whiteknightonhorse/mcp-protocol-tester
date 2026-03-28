@@ -8,10 +8,13 @@ class Scorer {
   }
 
   rec(phase, name, exp, got, ok, det = '') {
-    const entry = { phase, name, exp: String(exp), got: String(got), ok, det };
+    // Sanitize output — strip potential secrets from display
+    const safeGot = String(got).replace(/0x[a-fA-F0-9]{40,}/g, '0x***').replace(/ak_live_[a-f0-9]+/g, 'ak_***');
+    const safeDet = det ? det.slice(0, 120).replace(/0x[a-fA-F0-9]{40,}/g, '0x***').replace(/ak_live_[a-f0-9]+/g, 'ak_***') : '';
+    const entry = { phase, name, exp: String(exp), got: safeGot, ok, det: safeDet };
     this.all.push(entry);
     ok ? this.pass.push(entry) : this.fail.push(entry);
-    console.log(`  [${ok ? 'OK' : '!!'} ] ${name} — ${got}${det ? ' | ' + det.slice(0, 120) : ''}`);
+    console.log(`  [${ok ? 'OK' : '!!'} ] ${name} — ${safeGot}${safeDet ? ' | ' + safeDet : ''}`);
     return entry;
   }
 
