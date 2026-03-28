@@ -18,7 +18,7 @@ const { initX402, getWalletAddress } = require('./lib/x402-client');
 const { initMPP } = require('./lib/mpp-client');
 const { generateReport } = require('./lib/reporter');
 
-// Phase modules (17 phases: P0-P16)
+// Phase modules (18 phases: P0-P17 + report)
 const phase0  = require('./phases/00-discovery');
 const phase1  = require('./phases/01-infrastructure');
 const phase2  = require('./phases/02-mpp-challenges');
@@ -35,7 +35,8 @@ const phase12 = require('./phases/12-provider-health');
 const phase13 = require('./phases/13-cache-simulation');
 const phase14 = require('./phases/14-discover-tools');
 const phase15 = require('./phases/16-platform-features');
-const phase16 = require('./phases/15-report');
+const phase16 = require('./phases/17-agent-experience');
+const phaseReport = require('./phases/15-report');
 
 async function main() {
   const t0 = Date.now();
@@ -87,6 +88,7 @@ async function main() {
   if (config.phaseEnabled(13)) await phase13(scorer, config, context);
   if (config.phaseEnabled(14)) await phase14(scorer, config, context);
   if (config.phaseEnabled(15)) await phase15(scorer, config, context);
+  if (config.phaseEnabled(16)) await phase16(scorer, config, context);
 
   // Report: Always generate
   const totalTime = Math.round((Date.now() - t0) / 1000);
@@ -97,7 +99,7 @@ async function main() {
     spentMPP: context.spentMPP,
     totalTime,
   };
-  await phase16(scorer, config, { ...context, ...meta });
+  await phaseReport(scorer, config, { ...context, ...meta });
   generateReport(scorer, meta);
 
   console.log(`\nTotal: ${totalTime}s | x402: $${context.spentX402.toFixed(4)} | MPP: $${context.spentMPP.toFixed(4)}`);

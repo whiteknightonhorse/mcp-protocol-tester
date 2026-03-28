@@ -4,9 +4,9 @@ const path = require('path');
 // Single source of truth for phase weights
 const WEIGHTS = [
   ['P0', 5], ['P1', 5], ['P2', 5], ['P3', 5], ['P4', 5],
-  ['P5', 5], ['P6', 5], ['P7', 5], ['P8', 8], ['P9', 6],
-  ['P10', 5], ['P11', 5], ['P12', 5], ['P13', 5], ['P14', 5],
-  ['P15', 4], ['P16', 7], ['P17', 4],
+  ['P5', 5], ['P6', 5], ['P7', 5], ['P8', 7], ['P9', 5],
+  ['P10', 5], ['P11', 4], ['P12', 4], ['P13', 4], ['P14', 5],
+  ['P15', 3], ['P16', 6], ['P17', 8], ['P18', 4],
 ];
 
 function generateReport(scorer, meta) {
@@ -32,7 +32,7 @@ function generateReport(scorer, meta) {
     'MCP Protocol', 'MPP Payments', 'x402 Payments', 'Basic Security',
     'Payment Security', 'Advanced Security', 'Resilience',
     'Load Test', 'Provider Health', 'Cache & Simulation', 'Discover Tools',
-    'Platform Features', 'Platform Features', 'Report',
+    'Platform Features', 'Platform Features', 'Agent Experience', 'Report',
   ];
   pts.forEach(([, v, mx], i) => w(`  ${(labels[i] || '?').padEnd(24)} ${v}/${mx}`));
   w(`  ${'Total'.padEnd(24)} ${total}/100`);
@@ -67,7 +67,7 @@ function generateReport(scorer, meta) {
   }
 
   // Per-phase details
-  for (let i = 0; i <= 17; i++) {
+  for (let i = 0; i <= 18; i++) {
     const id = `P${i}`;
     const items = scorer.all.filter(t => t.phase === id);
     if (items.length === 0) continue;
