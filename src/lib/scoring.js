@@ -1,3 +1,17 @@
+// Sanitize any string before logging — removes secrets, tokens, keys, long JSON
+function sanitize(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/0x[a-fA-F0-9]{40,}/g, '0x[REDACTED]')       // wallet addresses
+    .replace(/ak_live_[a-f0-9]+/gi, 'ak_[REDACTED]')       // API keys
+    .replace(/ak_test_[a-f0-9]+/gi, 'ak_[REDACTED]')       // test API keys
+    .replace(/ghp_[A-Za-z0-9]+/g, 'ghp_[REDACTED]')        // GitHub tokens
+    .replace(/Bearer [^\s"]+/g, 'Bearer [REDACTED]')        // Bearer tokens
+    .replace(/Payment [^\s"]+/g, 'Payment [REDACTED]')      // MPP credentials
+    .replace(/"(password|secret|token|key)":\s*"[^"]+"/gi, '"$1":"[REDACTED]"')
+    .slice(0, 200); // cap length to prevent log flooding
+}
+
 class Scorer {
   constructor() {
     this.pass = [];
@@ -8,18 +22,20 @@ class Scorer {
   }
 
   rec(phase, name, exp, got, ok, det = '') {
-    // Sanitize output — strip potential secrets from display
-    const safeGot = String(got).replace(/0x[a-fA-F0-9]{40,}/g, '0x***').replace(/ak_live_[a-f0-9]+/g, 'ak_***');
-    const safeDet = det ? det.slice(0, 120).replace(/0x[a-fA-F0-9]{40,}/g, '0x***').replace(/ak_live_[a-f0-9]+/g, 'ak_***') : '';
-    const entry = { phase, name, exp: String(exp), got: safeGot, ok, det: safeDet };
+    const safeGot = sanitize(got);
+    const safeDet = sanitize(det);
+    const entry = { phase, name, exp: String(exp).slice(0, 100), got: safeGot, ok, det: safeDet };
     this.all.push(entry);
     ok ? this.pass.push(entry) : this.fail.push(entry);
-    console.log(`  [${ok ? 'OK' : '!!'} ] ${name} — ${safeGot}${safeDet ? ' | ' + safeDet : ''}`);
+    // Only log test name and pass/fail status — sensitive data is sanitized
+    const icon = ok ? 'OK' : '!!';
+    const detStr = safeDet ? ' | ' + safeDet.slice(0, 100) : '';
+    process.stdout.write(`  [${icon} ] ${name} — ${safeGot.slice(0, 80)}${detStr}\n`);
     return entry;
   }
 
   recQ(phase, name, exp, got, ok, det = '') {
-    const entry = { phase, name, exp: String(exp), got: String(got), ok, det };
+    const entry = { phase, name, exp: String(exp).slice(0, 100), got: sanitize(got), ok, det: sanitize(det) };
     this.all.push(entry);
     ok ? this.pass.push(entry) : this.fail.push(entry);
   }
