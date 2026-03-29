@@ -46,14 +46,19 @@ module.exports = async function phase18(scorer, config, context) {
 
       // Call a PAID tool via MCP — must NOT return free data
       const callRes = await mcpRequest(config.mcpServerUrl, 'tools/call', {
-        name: 'crypto.market.trending', arguments: {},
+        name: 'crypto.trending.get', arguments: {},
       }, mcpSid, config.apiKey);
 
-      const hasData = callRes.body?.result?.content?.[0]?.text?.length > 50;
-      const hasPaymentError = callRes.body?.error?.code === -32042
-        || JSON.stringify(callRes.body).includes('payment')
-        || JSON.stringify(callRes.body).includes('402');
-      const isFreeData = hasData && !hasPaymentError;
+      const responseText = JSON.stringify(callRes.body);
+      const hasPaymentError = callRes.body?.result?.isError === true
+        || callRes.body?.error?.code === -32042
+        || responseText.includes('payment_required')
+        || responseText.includes('payment')
+        || responseText.includes('402');
+      const hasActualData = responseText.includes('"coins"')
+        || responseText.includes('"trending"')
+        || (callRes.body?.result?.content?.[0]?.text?.length > 100 && !callRes.body?.result?.isError);
+      const isFreeData = hasActualData && !hasPaymentError;
 
       scorer.rec(PHASE, '18.1 MCP session payment enforced', 'requires payment',
         isFreeData ? 'FREE DATA' : 'payment enforced',
