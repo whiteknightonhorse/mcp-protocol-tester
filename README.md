@@ -1,5 +1,7 @@
 # mcp-protocol-tester
 
+[![SafeSkill 87/100](https://img.shields.io/badge/SafeSkill-87%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/whiteknightonhorse-mcp-protocol-tester)
+
 [![Security Audit](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml/badge.svg)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml)
 [![CI](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
