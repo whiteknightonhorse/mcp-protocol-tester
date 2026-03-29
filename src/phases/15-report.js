@@ -5,7 +5,7 @@
  */
 const { generateReport, WEIGHTS } = require('../lib/reporter');
 
-const PHASE = 'P18';
+const PHASE = 'P19';
 
 module.exports = async function phase17(scorer, config, context) {
   console.log('\n--- Phase 17: Report ---');

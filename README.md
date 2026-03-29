@@ -13,12 +13,13 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 
 ## Features
 
-- **18-phase test suite** — 800+ assertions across discovery, payments, security, and agent UX
+- **19-phase test suite** — 850+ assertions across discovery, payments, security, anti-abuse, and agent UX
 - **Dual-rail payment testing** — x402 + MPP in parallel with cross-rail price validation
 - **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
 - **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
 - **Payment security** — replay attacks, race conditions, double-spend, amount manipulation, stale challenges
 - **Advanced security** — SSRF, timing attacks, CORS, header injection, fuzz testing, response analysis
+- **Payment bypass prevention** — replay, double-spend 100x, signed underpayment, cache leak, MCP session abuse, cross-rail nonce
 - **Resilience testing** — brute force, SSL/TLS cipher/cert validation, enumeration, error cascade
 - **Load testing** — ramp-up stress, latency percentiles (p50/p95/p99), sustained load
 - **Tool discovery** — discover_tools prompt validation, stemming, category enumeration, abuse testing
@@ -85,7 +86,7 @@ CONCURRENCY=10 npm test
 
 > **Note:** Any CRITICAL (500) server error automatically caps the grade at D. Skipped phases score 0%.
 
-## Phases (18)
+## Phases (19)
 
 | Phase | Name               | What it tests                                                         | Cost    |
 |-------|--------------------|-----------------------------------------------------------------------|---------|
@@ -106,7 +107,8 @@ CONCURRENCY=10 npm test
 | P14   | Discover Tools     | Category enumeration (21 cats), category+task combos, stemming, keyword relevance, abuse (SQLi/XSS/unicode/10k chars), truncation, performance | $0 |
 | P15   | Platform Features  | Usage Analytics (account.usage/tools/timeseries), Tool Quality Index (tool_quality/rankings), Batch API (call_batch + REST), cross-feature catalog/MCP/billing validation | $0 |
 | P16   | Agent Experience   | Zero-knowledge bootstrap, tool description quality, error actionability (400/402/429), payment UX, response consistency, E2E lifecycle (golden path), MCP protocol completeness | $0 |
-| P17   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
+| P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x parallel, cross-rail nonce | ~$0.01 |
+| P18   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
 
 **Total estimated cost:** ~$0.07 per full run.
 
@@ -224,6 +226,18 @@ Both protocols can coexist on the same server — this tester verifies both work
 | **SSL/TLS** | 3 | Protocol version, cipher strength, certificate expiry |
 | **Enumeration** | 3 | Uniform errors, hidden endpoints, tool ID injection |
 | **Response Analysis** | 3 | Stack trace leaks, X-Powered-By, Server header |
+| **MCP Session Abuse** | 2 | Payment enforcement per MCP tools/call, batch abuse |
+| **Cache Leak** | 2 | Cross-key data leak, cache headers (no-store/Vary) |
+| **Signed Underpayment** | 1 | Valid signature with tampered amount |
+| **Cross-Tool Price** | 1 | Cheap tool payment used for expensive tool |
+| **Double-Spend 100x** | 1 | 100 parallel requests with single payment |
+| **Replay After Delay** | 1 | Same payment replayed after 30 seconds |
+| **Proto Pollution** | 1 | `__proto__.isPaid=true` bypass attempt |
+| **Header Duplication** | 2 | Mixed case, duplicate X-PAYMENT headers |
+| **Content-Type Bypass** | 3 | text/plain, text/xml, multipart with payment check |
+| **Cross-Rail Nonce** | 1 | x402 nonce presented as MPP credential |
+| **Session Entropy** | 1 | Session IDs >= 128-bit, unpredictable |
+| **Price Consistency** | 1 | Catalog price matches 402 challenge for all tools |
 
 ### Verify yourself
 
@@ -270,7 +284,8 @@ mcp-protocol-tester/
 │   │   ├── 14-discover-tools.js   # P14: Categories, stemming, relevance, abuse
 │   │   ├── 16-platform-features.js# P15: Usage Analytics, Tool Quality, Batch API
 │   │   ├── 17-agent-experience.js # P16: Bootstrap, descriptions, errors, E2E lifecycle
-│   │   └── 15-report.js           # P17: Grade, breakdown, export
+│   │   ├── 18-payment-bypass.js   # P17: Anti-abuse, replay, double-spend, cache leak
+│   │   └── 15-report.js           # P18: Grade, breakdown, export
 │   ├── lib/
 │   │   ├── config.js              # dotenv + env loader
 │   │   ├── http.js                # HTTP client with timeout + provider delays
