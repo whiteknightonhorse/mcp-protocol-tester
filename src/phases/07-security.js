@@ -35,7 +35,7 @@ module.exports = async function phase7(scorer, config, context) {
   await drain(r1);
 
   // 2. Invalid API key -> 401
-  const r2 = await sf(toolUrl, postOpts({ 'X-API-Key': 'invalid-key-12345' }));
+  const r2 = await sf(toolUrl, postOpts({ 'X-API-Key': 'test_' + 'x'.repeat(20) }));
   expectStatus(scorer, 'invalid-key-rejected', [401, 402, 403], r2.status, 'garbage API key');
   await drain(r2);
 

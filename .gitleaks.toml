@@ -1,0 +1,33 @@
+# Gitleaks configuration — allowlist for test fixtures
+# This project is a SECURITY TESTING tool — it intentionally contains
+# fake/invalid API keys and test credentials as part of its test suite.
+
+title = "mcp-protocol-tester gitleaks config"
+
+[allowlist]
+  description = "Test fixtures: fake API keys and credentials used in security tests"
+
+  # Allow test files that intentionally contain fake credentials
+  paths = [
+    '''src/phases/07-security\.js''',
+    '''src/phases/08-payment-security\.js''',
+    '''src/phases/09-advanced-security\.js''',
+    '''src/phases/10-resilience\.js''',
+    '''src/phases/17-agent-experience\.js''',
+    '''src/phases/18-payment-bypass\.js''',
+  ]
+
+  # Allow specific known test strings
+  regexTarget = "match"
+  regexes = [
+    '''invalid-key-12345''',
+    '''test_x{20}''',
+    '''fake[-_]''',
+    '''garbage''',
+    '''forged''',
+  ]
+
+  # Allow specific commits (initial commit had test data)
+  commits = [
+    "86cca251970e289034ec06df27eda02dea84d3fc",
+  ]
