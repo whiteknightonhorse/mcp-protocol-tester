@@ -37,6 +37,7 @@ const phase14 = require('./phases/14-discover-tools');
 const phase15 = require('./phases/16-platform-features');
 const phase16 = require('./phases/17-agent-experience');
 const phase17 = require('./phases/18-payment-bypass');
+const phase18 = require('./phases/19-cdp-facilitator');
 const phaseReport = require('./phases/15-report');
 
 async function main() {
@@ -91,6 +92,7 @@ async function main() {
   if (config.phaseEnabled(15)) await phase15(scorer, config, context);
   if (config.phaseEnabled(16)) await phase16(scorer, config, context);
   if (config.phaseEnabled(17)) await phase17(scorer, config, context);
+  if (config.phaseEnabled(18)) await phase18(scorer, config, context);
 
   // Report: Always generate
   const totalTime = Math.round((Date.now() - t0) / 1000);
