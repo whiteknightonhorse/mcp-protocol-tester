@@ -2,12 +2,12 @@ const fs = require('fs');
 const path = require('path');
 
 // Single source of truth for phase weights
+// P20 (report) excluded — display-only phase with 0 assertions
 const WEIGHTS = [
-  ['P0', 4], ['P1', 4], ['P2', 4], ['P3', 4], ['P4', 4],
-  ['P5', 4], ['P6', 4], ['P7', 5], ['P8', 6], ['P9', 5],
-  ['P10', 5], ['P11', 4], ['P12', 3], ['P13', 3], ['P14', 4],
-  ['P16', 5], ['P17', 7], ['P18', 9], ['P19', 6],
-  ['P20', 4],
+  ['P0', 5], ['P1', 5], ['P2', 5], ['P3', 5], ['P4', 5],
+  ['P5', 5], ['P6', 5], ['P7', 5], ['P8', 7], ['P9', 6],
+  ['P10', 5], ['P11', 4], ['P12', 3], ['P13', 4], ['P14', 5],
+  ['P16', 5], ['P17', 7], ['P18', 9], ['P19', 5],
 ];
 
 function generateReport(scorer, meta) {

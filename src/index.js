@@ -93,8 +93,9 @@ async function main() {
   if (config.phaseEnabled(16)) await phase16(scorer, config, context);
   if (config.phaseEnabled(17)) await phase17(scorer, config, context);
   if (config.phaseEnabled(18)) {
-    // Cooldown before CDP tests — rate limit may be exhausted after P0-P17 scans
-    await new Promise(r => setTimeout(r, 3000));
+    // Cooldown before CDP tests — rate limit (300 req/15min) exhausted after P0-P17 scans
+    console.log('\n  (15s cooldown before CDP facilitator tests...)');
+    await new Promise(r => setTimeout(r, 15000));
     await phase18(scorer, config, context);
   }
 

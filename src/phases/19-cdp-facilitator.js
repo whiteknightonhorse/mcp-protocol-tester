@@ -71,9 +71,29 @@ module.exports = async function phase19(scorer, config, context) {
   // ══════════════════════════════════════════════════════════════
   //  Group 2: 402 Response Integrity (6 tests)
   // ══════════════════════════════════════════════════════════════
-  console.log('\n  (waiting 5s for rate limit cooldown after earlier phases...)');
-  await sleep(5000);
+  // After full suite (P2+P3 scan 600+ tools), IP may have 900+ requests.
+  // Rate limit: 300 req/15min. Wait 30s for ~10 tokens to refill.
+  console.log('\n  (waiting 30s for rate limit cooldown after challenge scans...)');
+  await sleep(30000);
   console.log('  --- 402 Response Integrity ---');
+
+  // Helper: fetch with exponential backoff retry on rate limit
+  async function fetchWithRetry(url, opts, maxRetries = 3) {
+    let r;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      r = await sf(url, opts);
+      if (r.status === 402 || r.status === 200) return r; // success
+      if (r.status === 400 || r.status === 429) {
+        await drain(r);
+        const wait = (attempt + 1) * 10; // 10s, 20s, 30s
+        console.log(`    (rate limited, retry ${attempt + 1}/${maxRetries} in ${wait}s...)`);
+        await sleep(wait * 1000);
+      } else {
+        return r; // unexpected status, don't retry
+      }
+    }
+    return r;
+  }
 
   // Probe 3 paid tools from different providers
   const probeTools = ['crypto.trending', 'earthquake.feed', 'books.search'];
@@ -84,19 +104,9 @@ module.exports = async function phase19(scorer, config, context) {
   let mppHeaders = [];
 
   for (const toolId of probeTools) {
-    let r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
+    const r = await fetchWithRetry(`${config.apiUrl}/tools/${toolId}/call`, {
       method: 'POST', headers: AUTH, body: '{}',
     });
-
-    // Retry on rate limit (server returns 400 or 429 when limit exhausted)
-    if (r.status === 400 || r.status === 429) {
-      await drain(r);
-      console.log(`    rate limited on ${toolId}, waiting 10s...`);
-      await sleep(10000);
-      r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
-        method: 'POST', headers: AUTH, body: '{}',
-      });
-    }
 
     if (r.status === 402) {
       const wwwAuth = r.headers?.get?.('www-authenticate') || '';
@@ -191,9 +201,9 @@ module.exports = async function phase19(scorer, config, context) {
     `${catalogTools.length} tools in catalog`);
   await sleep(200);
 
-  // T19.13 — Free tools don't require payment
+  // T19.13 — Free tools don't require payment (with retry)
   const freeToolId = 'account.usage';
-  const freeRes = await sf(`${config.apiUrl}/tools/${freeToolId}/call`, {
+  const freeRes = await fetchWithRetry(`${config.apiUrl}/tools/${freeToolId}/call`, {
     method: 'POST', headers: AUTH,
     body: JSON.stringify({ period: '1d' }),
   });
@@ -204,8 +214,8 @@ module.exports = async function phase19(scorer, config, context) {
   await drain(freeRes);
   await sleep(200);
 
-  // T19.14 — Paid tools enforce payment
-  const paidRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+  // T19.14 — Paid tools enforce payment (with retry)
+  const paidRes = await fetchWithRetry(`${config.apiUrl}/tools/crypto.trending/call`, {
     method: 'POST', headers: AUTH, body: '{}',
   });
   let paidBody = null;
