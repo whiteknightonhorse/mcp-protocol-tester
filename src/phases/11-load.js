@@ -103,4 +103,15 @@ module.exports = async function phase11(scorer, config, context) {
     await sleep(500);
   }
   scorer.rec(PHASE, '11.6 Ramp-up', 'no degradation', 'tested', true, '1→5→10→25 concurrent');
+
+  // 11.X Large body resource exhaustion
+  console.log('  11.X Large body DoS...');
+  const largeBody = JSON.stringify({ query: 'x'.repeat(1024 * 1024) }); // 1MB
+  const largeRes = await sf(`${config.apiUrl}/tools/books.search/call`, {
+    method: 'POST', headers: AUTH, body: largeBody,
+  }, 15000);
+  scorer.rec(PHASE, '11.X 1MB body', '413|400', largeRes.status,
+    largeRes.status === 413 || largeRes.status === 400 || largeRes.status === 422,
+    `${largeRes.status} — server handles large body`);
+  await drain(largeRes);
 };

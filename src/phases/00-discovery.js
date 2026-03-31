@@ -98,5 +98,25 @@ module.exports = async function phase0(scorer, config, context) {
       'no API_KEY — set API_KEY in .env (server auto-registers on first request)');
   }
 
+  // P0.X Internal tools check
+  const internalPatterns = ['internal', 'admin', 'debug', 'test_'];
+  const internalTools = context.catalog.filter(t => {
+    const id = (t.id || t.name || '').toLowerCase();
+    return internalPatterns.some(p => id.includes(p));
+  });
+  scorer.rec(PHASE, 'catalog-no-internal', '0 internal', internalTools.length,
+    internalTools.length === 0,
+    internalTools.length > 0 ? `LEAK: ${internalTools.map(t=>t.id).join(', ')}` : 'clean');
+
+  // P0.X Well-known CORS check
+  const wkCorsRes = await sf(`${config.apiBaseUrl}/.well-known/mcp.json`, {
+    headers: { Origin: 'https://evil.com' },
+  });
+  const wkAcao = wkCorsRes.headers?.get?.('access-control-allow-origin') || '';
+  scorer.rec(PHASE, 'well-known-cors', '!wildcard', wkAcao,
+    wkAcao !== '*' && wkAcao !== 'https://evil.com',
+    wkAcao === '*' ? 'WARN: wildcard CORS on well-known' : 'safe');
+  await drain(wkCorsRes);
+
   console.log(`  Catalog: ${context.catalog.length} tools | MPP: ${context.hasMPP} | x402: ${context.hasX402}`);
 };

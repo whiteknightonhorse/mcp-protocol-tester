@@ -4,6 +4,7 @@
  * known tool (crypto.market.trending).
  */
 const { mcpRequest } = require('../lib/mcp-client');
+const { sf, drain } = require('../lib/http');
 
 const PHASE = 'P4';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -134,6 +135,35 @@ module.exports = async function phase4(scorer, config, context) {
     scorer.rec(PHASE, '4.8 old protocol version', 'handled', oldVerRes.status,
       oldVerRes.status === 200 || oldVerRes.body.error, 'server should negotiate or reject');
     await sleep(200);
+  }
+
+  // P4.X MCP session fixation
+  if (sid) {
+    const fixRes = await mcpRequest(url, 'tools/list', {}, sid.slice(0, -4) + '0000', apiKey);
+    scorer.rec(PHASE, '4.X session fixation', '!tools', fixRes.status,
+      !fixRes.body?.result?.tools?.length,
+      fixRes.body?.result?.tools?.length ? 'SESSION FIXATION!' : 'rejected');
+    await sleep(200);
+  }
+
+  // P4.X Oversized JSON-RPC
+  const bigPayload = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { padding: 'x'.repeat(1000000) } });
+  const bigRes = await sf(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Mcp-Session-Id': sid || '', Authorization: `Bearer ${apiKey}` },
+    body: bigPayload,
+  }, 10000);
+  scorer.rec(PHASE, '4.X oversized payload', '!500', bigRes.status,
+    bigRes.status !== 500, `${bigRes.status} — 1MB JSON-RPC`);
+  await drain(bigRes);
+  await sleep(200);
+
+  // P4.X JSON-RPC ID types
+  for (const id of ['string-id', null, -1, 3.14]) {
+    const idRes = await mcpRequest(url, 'tools/list', {}, sid, apiKey);
+    scorer.rec(PHASE, `4.X rpc-id=${JSON.stringify(id)}`, 'handled', idRes.status,
+      idRes.status === 200 || idRes.body?.error, 'non-standard ID');
+    await sleep(150);
   }
 
   console.log(`  MCP session: ${sid ? sid.slice(0, 24) + '...' : 'none'}`);

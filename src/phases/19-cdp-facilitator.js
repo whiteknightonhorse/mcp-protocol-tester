@@ -203,6 +203,34 @@ module.exports = async function phase19(scorer, config, context) {
     paidRes.status, enforced,
     enforced ? 'escrow hard gate active' : `got ${paidRes.status}: ${paidBody?.error || ''}`);
 
+  // 19.X Facilitator DNS/TLS check
+  try {
+    const tls = require('tls');
+    const facHost = 'facilitator.payai.network';
+    const facTls = await new Promise((resolve, reject) => {
+      const socket = tls.connect({ host: facHost, port: 443, servername: facHost }, () => {
+        const cert = socket.getPeerCertificate();
+        const proto = socket.getProtocol();
+        socket.destroy();
+        resolve({ proto, valid_to: cert.valid_to, subject: cert.subject?.CN });
+      });
+      socket.setTimeout(5000);
+      socket.on('timeout', () => { socket.destroy(); reject(new Error('timeout')); });
+      socket.on('error', reject);
+    });
+    scorer.rec(PHASE, '19.X facilitator TLS', 'valid cert', facTls.proto,
+      facTls.proto === 'TLSv1.3' || facTls.proto === 'TLSv1.2',
+      `CN=${facTls.subject} expires=${facTls.valid_to}`);
+  } catch(e) {
+    scorer.rec(PHASE, '19.X facilitator TLS', 'check', 'error', false, e.message.slice(0, 60));
+  }
+
+  // 19.X Wallet address matches known constant
+  scorer.rec(PHASE, '19.X wallet constant check', EXPECTED_WALLET.slice(0,10),
+    wallets[0]?.slice(0,10) || 'none',
+    wallets.length > 0 && wallets[0]?.toLowerCase() === EXPECTED_WALLET.toLowerCase(),
+    'wallet matches hardcoded expected value');
+
   // Summary
   const total = scorer.all.filter(t => t.phase === PHASE).length;
   const passed = scorer.all.filter(t => t.phase === PHASE && t.ok).length;

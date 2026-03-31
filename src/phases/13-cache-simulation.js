@@ -146,4 +146,30 @@ module.exports = async function phase13(scorer, config, context) {
   const hasErrorField = !!errBody.error || !!errBody.message;
   scorer.rec(PHASE, '13.7 Error schema', '{error,message}', hasErrorField ? 'yes' : 'no',
     hasErrorField, `keys: ${Object.keys(errBody).join(',')}`);
+
+  // 13.X Cache poisoning via X-Forwarded-Host
+  const poisonRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { ...AUTH, 'X-Forwarded-Host': 'evil.com', 'X-Original-URL': '/admin' },
+    body: '{}',
+  });
+  let poisonBody = ''; try { poisonBody = await poisonRes.text(); } catch {}
+  const poisoned = poisonBody.includes('evil.com');
+  scorer.rec(PHASE, '13.X cache poisoning', 'no reflection', poisoned ? 'REFLECTED' : 'safe',
+    !poisoned, poisoned ? 'X-Forwarded-Host reflected — cache poisoning risk!' : 'headers not reflected');
+  await sleep(200);
+
+  // 13.X Cache key collision
+  const cacheA = await sf(`${config.apiUrl}/tools/books.search/call`, {
+    method: 'POST', headers: AUTH, body: JSON.stringify({ query: 'dune' }),
+  });
+  const bodyA = await cacheA.text().catch(() => '');
+  await sleep(300);
+  const cacheB = await sf(`${config.apiUrl}/tools/books.search/call`, {
+    method: 'POST', headers: AUTH, body: JSON.stringify({ query: 'foundation' }),
+  });
+  const bodyB = await cacheB.text().catch(() => '');
+  const collision = bodyA.length > 100 && bodyB.length > 100 && bodyA === bodyB;
+  scorer.rec(PHASE, '13.X cache key collision', 'different data', collision ? 'SAME' : 'different',
+    !collision, collision ? 'CACHE KEY COLLISION — different params return same data!' : 'params differentiated');
 };

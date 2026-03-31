@@ -403,5 +403,79 @@ module.exports = async function phase9(scorer, config, context) {
       e.message.slice(0, 80));
   }
 
+  // 9.X SSRF IPv6/octal/decimal
+  console.log('  9.X SSRF alternate formats...');
+  const altSsrf = [
+    ['IPv6 localhost', 'http://[::1]:8080/'],
+    ['octal IP', 'http://0177.0.0.1/'],
+    ['decimal IP', 'http://2130706433/'],
+  ];
+  for (const [label, url] of altSsrf) {
+    // Find a URL-accepting tool in catalog
+    const toolId = context.catalog.find(t => (t.id||'').includes('diffbot'))?.id || 'diffbot.article_extract';
+    const r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
+      method: 'POST', headers: AUTH, body: JSON.stringify({ url }),
+    });
+    const body = await r.text().catch(() => '');
+    const leaked = body.includes('root:') || body.includes('ami-') || body.includes('instance-id');
+    scorer.rec(PHASE, `9.X SSRF ${label}`, 'no leak', leaked ? 'LEAKED' : r.status,
+      !leaked, leaked ? `DATA LEAKED via ${label}!` : 'blocked');
+    await sleep(300);
+  }
+
+  // 9.X XXE injection
+  console.log('  9.X XXE...');
+  const xxeBody = '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>';
+  const xxeRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST', headers: { 'Content-Type': 'text/xml', Authorization: AUTH['Authorization'] || '' },
+    body: xxeBody,
+  });
+  const xxeText = await xxeRes.text().catch(() => '');
+  scorer.rec(PHASE, '9.X XXE injection', 'no file content', xxeText.includes('root:') ? 'LEAKED' : xxeRes.status,
+    !xxeText.includes('root:'), xxeText.includes('root:') ? 'XXE EXPLOIT!' : 'safe');
+  await sleep(200);
+
+  // 9.X SSTI payloads
+  console.log('  9.X SSTI...');
+  const sstiPayloads = ['{{7*7}}', '${7*7}', '<%= 7*7 %>'];
+  for (const payload of sstiPayloads) {
+    const r = await sf(`${config.apiUrl}/tools/books.search/call`, {
+      method: 'POST', headers: AUTH, body: JSON.stringify({ query: payload }),
+    });
+    const body = await r.text().catch(() => '');
+    scorer.rec(PHASE, `9.X SSTI ${payload.slice(0,6)}`, 'no 49', body.includes('49') ? 'EXECUTED' : r.status,
+      !body.includes('49') || body.includes('query'), 'template injection check');
+    await sleep(200);
+  }
+
+  // 9.X CORS subdomain confusion
+  console.log('  9.X CORS subdomain...');
+  const subRes = await sf(`${config.apiUrl}/tools`, {
+    headers: { Origin: 'https://api.apibase.pro.evil.com' },
+  });
+  const subAcao = subRes.headers?.get?.('access-control-allow-origin') || '';
+  scorer.rec(PHASE, '9.X CORS subdomain spoof', '!reflected', subAcao,
+    subAcao !== 'https://api.apibase.pro.evil.com',
+    subAcao === 'https://api.apibase.pro.evil.com' ? 'CORS subdomain bypass!' : 'safe');
+  await drain(subRes);
+  await sleep(200);
+
+  // 9.X Access-Control-Expose-Headers audit
+  const expHdrs = subRes.headers?.get?.('access-control-expose-headers') || '';
+  const sensitiveExposed = ['x-payment', 'authorization', 'mcp-session'].some(h => expHdrs.toLowerCase().includes(h));
+  scorer.rec(PHASE, '9.X expose-headers audit', 'no sensitive', sensitiveExposed ? 'EXPOSED' : 'safe',
+    !sensitiveExposed, `exposed: ${expHdrs || 'none'}`);
+
+  // 9.X ReDoS test
+  console.log('  9.X ReDoS...');
+  const redosStart = Date.now();
+  const redosRes = await sf(`${config.apiUrl}/tools/books.search/call`, {
+    method: 'POST', headers: AUTH, body: JSON.stringify({ query: 'a'.repeat(50000) + '!' }),
+  }, 10000);
+  const redosMs = Date.now() - redosStart;
+  scorer.rec(PHASE, '9.X ReDoS', '<5000ms', `${redosMs}ms`, redosMs < 5000,
+    redosMs >= 5000 ? 'POSSIBLE ReDoS!' : 'fast response');
+  await drain(redosRes);
+
   console.log('  Advanced security tests complete');
 };

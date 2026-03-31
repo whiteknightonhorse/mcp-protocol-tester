@@ -449,6 +449,85 @@ module.exports = async function phase18(scorer, config, context) {
     crossRailRes.status === 200 ? 'cross-rail nonce accepted!' : 'rejected');
   await drain(crossRailRes);
 
+  // 18.X Cross-chain replay (Tempo nonce as x402)
+  console.log('  --- Cross-chain replay ---');
+  const tempoFake = Buffer.from(JSON.stringify({
+    scheme: 'exact', amount: '1000', network: 'tempo:4217',
+    asset: '0x20C000000000000000000000b9537d11c60E8b50',
+    payTo: '0x183fFa1335EB66858EebCb86F651f70632821f8d',
+  })).toString('base64');
+  const ccRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { ...AUTH, 'X-Payment': tempoFake, 'PAYMENT-SIGNATURE': tempoFake },
+    body: '{}',
+  });
+  scorer.rec(PHASE, '18.X cross-chain replay', '!200', ccRes.status,
+    ccRes.status !== 200,
+    ccRes.status === 200 ? 'CRITICAL: cross-chain replay accepted!' : 'rejected');
+  await drain(ccRes);
+  await sleep(200);
+
+  // 18.X WebSocket upgrade bypass
+  console.log('  --- WebSocket upgrade bypass ---');
+  const wsRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { ...AUTH, 'Upgrade': 'websocket', 'Connection': 'Upgrade' },
+    body: '{}',
+  });
+  scorer.rec(PHASE, '18.X websocket upgrade', '!free data', wsRes.status,
+    wsRes.status === 402 || wsRes.status === 400 || wsRes.status === 426,
+    wsRes.status === 200 ? 'CRITICAL: websocket bypass!' : 'payment enforced');
+  await drain(wsRes);
+  await sleep(200);
+
+  // 18.X Pay once, burst 50 in 100ms
+  console.log('  --- Pay-once burst ---');
+  // Without actual payment, verify that 50 rapid unpaid requests all get 402
+  const burstPromises = Array(50).fill(null).map(() =>
+    sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: AUTH, body: '{}',
+    }, 5000)
+  );
+  const burstResults = await Promise.all(burstPromises);
+  const burstFree = burstResults.filter(r => r.status === 200).length;
+  scorer.rec(PHASE, '18.X burst 50 unpaid', '0 free', burstFree,
+    burstFree === 0,
+    burstFree > 0 ? `CRITICAL: ${burstFree} free responses in burst!` : 'all require payment');
+  for (const r of burstResults) await drain(r);
+  await sleep(300);
+
+  // 18.X Transfer-Encoding chunked bypass
+  const teRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { ...AUTH, 'Transfer-Encoding': 'chunked' },
+    body: '{}',
+  });
+  scorer.rec(PHASE, '18.X chunked encoding', '!free', teRes.status,
+    teRes.status === 402 || teRes.status === 400,
+    teRes.status === 200 ? 'CRITICAL: chunked encoding bypassed payment!' : 'payment enforced');
+  await drain(teRes);
+  await sleep(200);
+
+  // 18.X Nonce entropy check
+  console.log('  --- Nonce entropy ---');
+  const nonces = [];
+  for (let i = 0; i < 5; i++) {
+    const r = await sf(`${config.apiUrl}/tools/earthquake.feed/call`, {
+      method: 'POST', headers: AUTH, body: '{}',
+    });
+    if (r.status === 402) {
+      let b = {}; try { b = await r.json(); } catch {}
+      nonces.push(b.request_id || '');
+    } else { await drain(r); }
+    await sleep(200);
+  }
+  const uniqueNonces = new Set(nonces.filter(Boolean)).size;
+  const minLen = Math.min(...nonces.filter(Boolean).map(n => n.length));
+  scorer.rec(PHASE, '18.X nonce entropy', '>=20 chars + unique',
+    `len=${minLen} unique=${uniqueNonces}/${nonces.length}`,
+    uniqueNonces === nonces.filter(Boolean).length && minLen >= 20,
+    uniqueNonces < nonces.filter(Boolean).length ? 'DUPLICATE NONCES!' : 'good entropy');
+
   // Summary
   const total = scorer.all.filter(t => t.phase === PHASE).length;
   const passed = scorer.all.filter(t => t.phase === PHASE && t.ok).length;

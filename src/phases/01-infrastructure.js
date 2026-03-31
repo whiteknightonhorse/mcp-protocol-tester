@@ -141,6 +141,17 @@ module.exports = async function phase1(scorer, config, context) {
   }
   scorer.rec(PHASE, 'facilitator', 200, fr.status, fOk, facilitatorInfo);
 
+  // P1.X Health info leakage check
+  const healthCheckRes = await sf(`${config.apiBaseUrl}/health/ready`);
+  let healthCheckBody = {};
+  try { healthCheckBody = await healthCheckRes.json(); } catch { await drain(healthCheckRes); }
+  const healthStr = JSON.stringify(healthCheckBody).toLowerCase();
+  const leakyPatterns = ['password', 'connection', 'postgres://', 'redis://', '/app/src', '/usr/local', 'node_modules'];
+  const healthLeaks = leakyPatterns.filter(p => healthStr.includes(p));
+  scorer.rec(PHASE, 'health-no-leak', '0 leaks', healthLeaks.length,
+    healthLeaks.length === 0,
+    healthLeaks.length > 0 ? `LEAKED: ${healthLeaks.join(', ')}` : 'clean');
+
   console.log(`  Wallet: ${walletAddr || 'none'}`);
   console.log(`  Balances — Tempo: ${(context.balTempo || 0).toFixed(4)} USDC | Base: ${(context.balBase || 0).toFixed(4)} USDC`);
   console.log(`  Gas — Tempo: ${(context.gasBalTempo || 0).toFixed(6)} native | Base: ${(context.gasBalBase || 0).toFixed(6)} ETH`);

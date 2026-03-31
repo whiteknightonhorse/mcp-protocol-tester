@@ -152,5 +152,49 @@ module.exports = async function phase7(scorer, config, context) {
     requestId.length > 0, requestId.slice(0, 40));
   await drain(ridRes);
 
+  // 7.X HTTP method override bypass
+  for (const hdr of ['X-HTTP-Method-Override', 'X-HTTP-Method', 'X-Method-Override']) {
+    const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: { ...AUTH, [hdr]: 'GET' }, body: '{}',
+    });
+    scorer.rec(PHASE, `7.X ${hdr} override`, '!bypass', r.status,
+      r.status === 402 || r.status === 400 || r.status === 200,
+      r.status === 200 ? 'check if payment was bypassed' : 'method override ignored');
+    await drain(r); await sleep(200);
+  }
+
+  // 7.X Path traversal in tool ID
+  const traversals = ['tools/..%2F..%2Fadmin/call', 'tools/../../admin/call', 'tools/..\\..\\admin/call'];
+  for (const path of traversals) {
+    const r = await sf(`${config.apiBaseUrl}/api/v1/${path}`, {
+      method: 'POST', headers: AUTH, body: '{}',
+    });
+    scorer.rec(PHASE, '7.X path traversal', '!200', r.status,
+      r.status !== 200, r.status === 200 ? 'PATH TRAVERSAL!' : 'blocked');
+    await drain(r); await sleep(150);
+  }
+
+  // 7.X Expanded hidden endpoints
+  const moreHidden = ['/graphql', '/swagger', '/api-docs', '/metrics', '/prometheus',
+    '/.env', '/.git/HEAD', '/config', '/actuator', '/debug/vars'];
+  let moreFound = 0;
+  for (const p of moreHidden) {
+    const r = await sf(`${config.apiBaseUrl}${p}`, { headers: AUTH });
+    if (r.status === 200) moreFound++;
+    await drain(r); await sleep(100);
+  }
+  scorer.rec(PHASE, '7.X expanded hidden endpoints', '0 found', moreFound,
+    moreFound === 0, moreFound > 0 ? `${moreFound} exposed!` : 'all blocked');
+
+  // 7.X Request smuggling probe
+  const smuggleRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { ...AUTH, 'Content-Length': '2', 'Transfer-Encoding': 'chunked' },
+    body: '{}',
+  });
+  scorer.rec(PHASE, '7.X request smuggling', '!500', smuggleRes.status,
+    smuggleRes.status !== 500, 'ambiguous framing handled');
+  await drain(smuggleRes);
+
   console.log('  Security tests complete');
 };

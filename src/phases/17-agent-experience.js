@@ -470,6 +470,20 @@ module.exports = async function phase17(scorer, config, context) {
     noInitRes.status === 400 || noInitRes.status === 404 ? 'clear rejection' : `status=${noInitRes.status}`);
   await drain(noInitRes);
 
+  // 17.X Error internal path leakage
+  console.log('  --- Error path leakage ---');
+  const pathErrs = [
+    await sf(`${config.apiUrl}/tools/nonexistent_xyz/call`, { method: 'POST', headers: AUTH, body: '{}' }),
+    await sf(`${config.apiUrl}/tools/crypto.trending/call`, { method: 'POST', headers: AUTH, body: 'INVALID' }),
+  ];
+  let pathLeaked = false;
+  for (const r of pathErrs) {
+    const body = await r.text().catch(() => '');
+    if (body.includes('/app/src') || body.includes('/usr/local') || body.includes('node_modules/')) pathLeaked = true;
+  }
+  scorer.rec(PHASE, '17.X no internal paths', 'clean', pathLeaked ? 'LEAKED' : 'clean',
+    !pathLeaked, pathLeaked ? 'internal paths in error responses!' : 'errors sanitized');
+
   // Summary
   const total = scorer.all.filter(t => t.phase === PHASE).length;
   const passed = scorer.all.filter(t => t.phase === PHASE && t.ok).length;

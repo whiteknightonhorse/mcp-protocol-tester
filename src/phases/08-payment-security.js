@@ -360,5 +360,70 @@ module.exports = async function phase8(scorer, config, context) {
       match || !mppAmount, `x402=${x402Amount} mpp=${mppAmount}`);
   } else { await drain(probePrice); }
 
+  // 8.X Expired challenge test
+  console.log('  8.X Expired challenge...');
+  const EXPECTED_PAYTO = '0x50EbDa9dA5dC19c302Ca059d7B9E06e264936480';
+  const x402 = !!getX402Client();
+  if (x402 && config.apiKey) {
+    const expProbe = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: AUTH, body: '{}',
+    });
+    if (expProbe.status === 402) {
+      const exp402 = await expProbe.json();
+      // Tamper: set maxTimeoutSeconds to 0 (expired)
+      const tampered = JSON.parse(JSON.stringify(exp402));
+      if (tampered.accepts?.[0]) tampered.accepts[0].maxTimeoutSeconds = 0;
+      try {
+        const payH = await makeX402Payment(tampered);
+        const xp = Object.values(payH)[0];
+        const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+          method: 'POST', headers: { ...AUTH, ...payH, 'X-PAYMENT': xp }, body: '{}',
+        });
+        scorer.rec(PHASE, '8.X expired challenge', '!200', r.status,
+          r.status !== 200, r.status === 200 ? 'CRITICAL: expired challenge accepted!' : 'rejected');
+        await drain(r);
+      } catch(e) { scorer.rec(PHASE, '8.X expired challenge', 'rejected', 'SDK rejected', true); }
+    } else { await drain(expProbe); }
+  }
+  await sleep(300);
+
+  // 8.X Integer overflow in amount
+  console.log('  8.X Integer overflow...');
+  const overflowAmounts = ['18446744073709551616', '99999999999999999999', '-1'];
+  for (const amt of overflowAmounts) {
+    const b64 = forgedBase64(amt, EXPECTED_PAYTO);
+    const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: { ...AUTH, 'X-Payment': b64, 'PAYMENT-SIGNATURE': b64 }, body: '{}',
+    });
+    scorer.rec(PHASE, `8.X overflow amount=${amt.slice(0,8)}`, '!200', r.status,
+      r.status !== 200, r.status === 200 ? `CRITICAL: overflow accepted!` : 'rejected');
+    await drain(r); await sleep(200);
+  }
+
+  // 8.X Off-by-one underpayment (999 vs 1000)
+  console.log('  8.X Off-by-one...');
+  const offBy1 = forgedBase64('999', EXPECTED_PAYTO);
+  const rOff = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST', headers: { ...AUTH, 'X-Payment': offBy1, 'PAYMENT-SIGNATURE': offBy1 }, body: '{}',
+  });
+  scorer.rec(PHASE, '8.X off-by-one 999 vs 1000', '!200', rOff.status,
+    rOff.status !== 200, rOff.status === 200 ? 'CRITICAL: off-by-one accepted!' : 'rejected');
+  await drain(rOff);
+  await sleep(200);
+
+  // 8.X Payment on wrong network (testnet)
+  console.log('  8.X Wrong network...');
+  const wrongNet = Buffer.from(JSON.stringify({
+    scheme: 'exact', amount: '1000', network: 'eip155:84532',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    payTo: EXPECTED_PAYTO,
+  })).toString('base64');
+  const rNet = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST', headers: { ...AUTH, 'X-Payment': wrongNet, 'PAYMENT-SIGNATURE': wrongNet }, body: '{}',
+  });
+  scorer.rec(PHASE, '8.X wrong network (testnet)', '!200', rNet.status,
+    rNet.status !== 200, rNet.status === 200 ? 'CRITICAL: testnet payment on mainnet!' : 'rejected');
+  await drain(rNet);
+
   console.log('  Payment security tests complete');
 };

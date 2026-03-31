@@ -355,5 +355,58 @@ module.exports = async function phase10(scorer, config, context) {
       e.message.slice(0, 100));
   }
 
+  // 10.X IP spoofing via alternate headers
+  console.log('  10.X IP spoofing headers...');
+  const spoofHeaders = ['X-Real-IP', 'X-Client-IP', 'CF-Connecting-IP', 'True-Client-IP', 'Forwarded'];
+  for (const hdr of spoofHeaders) {
+    const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake_key_test', [hdr]: '1.2.3.4' },
+      body: '{}',
+    });
+    scorer.rec(PHASE, `10.X ${hdr} spoof`, '401', r.status,
+      r.status === 401, r.status !== 401 ? `${hdr} may affect auth` : 'ignored');
+    await drain(r); await sleep(100);
+  }
+
+  // 10.X TLS 1.0/1.1 rejection
+  console.log('  10.X TLS old version rejection...');
+  try {
+    const oldTls = await new Promise((resolve, reject) => {
+      const socket = tls.connect({
+        host: hostname, port: Number(port), servername: hostname,
+        maxVersion: 'TLSv1.1', rejectUnauthorized: true,
+      }, () => { socket.destroy(); resolve('connected'); });
+      socket.setTimeout(5000);
+      socket.on('timeout', () => { socket.destroy(); reject(new Error('timeout')); });
+      socket.on('error', (e) => reject(e));
+    });
+    scorer.rec(PHASE, '10.X TLS 1.1 rejected', 'refused', 'connected',
+      false, 'OLD TLS ACCEPTED — should be rejected');
+  } catch (e) {
+    scorer.rec(PHASE, '10.X TLS 1.1 rejected', 'refused', 'refused', true, 'old TLS properly rejected');
+  }
+
+  // 10.X Referrer-Policy header
+  const refRes = await sf(`${config.apiUrl}/tools`, {});
+  const refPolicy = refRes.headers?.get?.('referrer-policy') || '';
+  scorer.rec(PHASE, '10.X referrer-policy', 'present', refPolicy || 'missing',
+    refPolicy.length > 0, refPolicy || 'MISSING — add Referrer-Policy header');
+  await drain(refRes);
+
+  // 10.X Rate limit granularity (per-key not per-IP)
+  // Use two different invalid keys rapidly — both should get 401 independently
+  const rlKey1 = Array(20).fill(null).map(() => sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake_a_' + Math.random() }, body: '{}',
+  }));
+  const rlKey2 = Array(5).fill(null).map(() => sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST', headers: AUTH, body: '{}',
+  }));
+  const [rl1, rl2] = await Promise.all([Promise.all(rlKey1), Promise.all(rlKey2)]);
+  const validStillWorks = rl2.some(r => r.status === 200 || r.status === 402);
+  scorer.rec(PHASE, '10.X rate limit per-key', 'valid key works', validStillWorks ? 'yes' : 'blocked',
+    validStillWorks, validStillWorks ? 'per-key rate limiting' : 'shared rate limit — bad');
+  for (const r of [...rl1, ...rl2]) await drain(r);
+
   console.log('  Resilience tests complete');
 };

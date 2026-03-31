@@ -157,6 +157,23 @@ module.exports = async function phase3(scorer, config, context) {
     await sleep(getDelay(id));
   }
 
+  // P3.X Challenge nonce uniqueness
+  const nonceProbes = [];
+  for (let i = 0; i < 5; i++) {
+    const r = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {}) }, body: '{}',
+    });
+    if (r.status === 402) {
+      let b = {}; try { b = await r.json(); } catch {}
+      nonceProbes.push(b.request_id || JSON.stringify(b.accepts?.[0]?.extra || ''));
+    } else { await drain(r); }
+    await sleep(300);
+  }
+  const uniqueNonces = new Set(nonceProbes).size;
+  scorer.rec(PHASE, 'challenge-nonce-unique', '5 unique', `${uniqueNonces}/5`,
+    uniqueNonces === nonceProbes.length || nonceProbes.length < 2,
+    uniqueNonces < nonceProbes.length ? 'DUPLICATE nonces — replay risk!' : 'all unique');
+
   scorer.rec(PHASE, 'x402-challenge-summary',
     `>${tools.length * 0.5} valid`, `${stats.correct402}/${tools.length}`,
     stats.correct402 > 0,

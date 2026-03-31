@@ -76,4 +76,18 @@ module.exports = async function phase12(scorer, config, context) {
 
   // Store for report
   context.healthMap = healthMap;
+
+  // P12.X Provider error sanitization
+  const downProviders = healthMap.filter(h => h.status === 'DOWN');
+  if (downProviders.length > 0) {
+    const downTool = downProviders[0].tool;
+    const errRes = await sf(`${config.apiUrl}/tools/${downTool}/call`, {
+      method: 'POST', headers: AUTH, body: '{}',
+    });
+    let errBody = ''; try { errBody = await errRes.text(); } catch {}
+    const leaksInternal = errBody.includes('/app/') || errBody.includes('node_modules') ||
+      errBody.includes('PROVIDER_KEY') || errBody.includes('api_key');
+    scorer.rec(PHASE, '12.X provider error sanitized', 'no internals', leaksInternal ? 'LEAKED' : 'clean',
+      !leaksInternal, leaksInternal ? 'provider error leaks internal details!' : 'errors sanitized');
+  }
 };
