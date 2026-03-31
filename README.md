@@ -15,7 +15,7 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 
 ## Features
 
-- **19-phase test suite** — 850+ assertions across discovery, payments, security, anti-abuse, and agent UX
+- **20-phase test suite** — 920+ assertions across discovery, payments, security, anti-abuse, and agent UX
 - **Dual-rail payment testing** — x402 + MPP in parallel with cross-rail price validation
 - **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
 - **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
@@ -88,29 +88,30 @@ CONCURRENCY=10 npm test
 
 > **Note:** Any CRITICAL (500) server error automatically caps the grade at D. Skipped phases score 0%.
 
-## Phases (19)
+## Phases (20)
 
 | Phase | Name               | What it tests                                                         | Cost    |
 |-------|--------------------|-----------------------------------------------------------------------|---------|
-| P0    | Discovery          | Catalog fetch, schema validation, `.well-known/*`, dual-rail detection | $0      |
-| P1    | Infrastructure     | Health, Tempo/Base RPC, USDC + gas balances, facilitator              | $0      |
+| P0    | Discovery          | Catalog fetch, schema validation, `.well-known/*`, dual-rail detection, internal tool leak check, well-known CORS | $0 |
+| P1    | Infrastructure     | Health, Tempo/Base RPC, USDC + gas balances, facilitator, health info leakage check | $0 |
 | P2    | MPP Challenges     | `WWW-Authenticate: Payment` on all tools + field validation (recipient, amount, chainId) | $0 |
-| P3    | x402 Challenges    | x402 402 body on all tools + field validation (payTo, network, asset, scheme, multi-accept) | $0 |
-| P4    | MCP Protocol       | initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation, JSON-RPC error codes | $0 |
+| P3    | x402 Challenges    | x402 402 body on all tools + field validation (payTo, network, asset, scheme, multi-accept), challenge nonce uniqueness | $0 |
+| P4    | MCP Protocol       | initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation, JSON-RPC error codes, session fixation, oversized payload, ID type handling | $0 |
 | P5    | MPP Payments       | Real Tempo USDC payments via mppx + response content validation       | ~$0.01  |
 | P6    | x402 Payments      | Real Base USDC payments via @x402/core + response content validation   | ~$0.05  |
-| P7    | Basic Security     | Auth bypass, forged credentials, HTTP method enforcement, Content-Type manipulation, request ID | $0 |
-| P8    | Payment Security   | Replay (same/cross-tool), race condition (10 parallel), double-spend, amount manipulation (0/negative/underpay/tampered payTo), float precision, cross-rail price consistency | ~$0.01 |
-| P9    | Advanced Security  | SSRF (AWS/GCP/localhost/file://), timing attacks, CORS, header injection (CRLF/64KB/Host), fuzz (null bytes/unicode/JSON bomb/prototype pollution), response analysis (stack traces/headers) | $0 |
-| P10   | Resilience         | Brute force (50 keys), XFF bypass, SSL/TLS version + cipher + cert expiry, enumeration, error cascade | $0 |
-| P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load, latency p50/p95/p99, ramp-up (1→5→10→25) | $0 |
-| P12   | Provider Health    | 1 tool per provider → HEALTHY/DOWN/RATE_LIMITED + latency             | $0      |
-| P13   | Cache & Simulation | Cache isolation, cache leak test, User-Agent/Accept variation, REST+MCP simultaneous, error schema | $0 |
+| P7    | Basic Security     | Auth bypass, forged credentials, HTTP method enforcement + override bypass, Content-Type manipulation, request ID, path traversal, expanded hidden endpoints (+10), request smuggling | $0 |
+| P8    | Payment Security   | Replay (same/cross-tool), race condition (10 parallel), double-spend, amount manipulation (0/negative/underpay/tampered payTo/integer overflow 2^64), float precision, off-by-one (999 vs 1000), expired challenge, wrong network (testnet→mainnet), cross-rail price consistency | ~$0.01 |
+| P9    | Advanced Security  | SSRF (AWS/GCP/localhost/file:// + IPv6/octal/decimal), timing attacks, CORS + subdomain confusion + expose-headers audit, header injection (CRLF/64KB/Host), fuzz (null bytes/unicode/JSON bomb/prototype pollution), XXE injection, SSTI payloads, ReDoS, response analysis | $0 |
+| P10   | Resilience         | Brute force (50 keys), XFF + 5 IP spoofing headers bypass, SSL/TLS version + cipher + cert expiry + TLSv1.1 rejection, enumeration, error cascade, referrer-policy, rate limit granularity (per-key) | $0 |
+| P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load, latency p50/p95/p99, ramp-up (1→5→10→25), large body DoS (1MB) | $0 |
+| P12   | Provider Health    | 1 tool per provider → HEALTHY/DOWN/RATE_LIMITED + latency, provider error sanitization | $0 |
+| P13   | Cache & Simulation | Cache isolation, cache leak test, cache poisoning (X-Forwarded-Host), cache key collision, User-Agent/Accept variation, REST+MCP simultaneous, error schema | $0 |
 | P14   | Discover Tools     | Category enumeration (21 cats), category+task combos, stemming, keyword relevance, abuse (SQLi/XSS/unicode/10k chars), truncation, performance | $0 |
-| P15   | Platform Features  | Usage Analytics (account.usage/tools/timeseries), Tool Quality Index (tool_quality/rankings), Batch API (call_batch + REST), cross-feature catalog/MCP/billing validation | $0 |
-| P16   | Agent Experience   | Zero-knowledge bootstrap, tool description quality, error actionability (400/402/429), payment UX, response consistency, E2E lifecycle (golden path), MCP protocol completeness | $0 |
-| P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x parallel, cross-rail nonce | ~$0.01 |
-| P18   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
+| P15   | Platform Features  | Usage Analytics (account.usage/tools/timeseries), Tool Quality Index (tool_quality/rankings), Batch API (call_batch + REST), recursive batch, batch tool_id injection, cross-feature validation | $0 |
+| P16   | Agent Experience   | Zero-knowledge bootstrap, tool description quality, error actionability (400/402/429), payment UX, response consistency, E2E lifecycle (golden path), MCP protocol completeness, error path leakage | $0 |
+| P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x, cross-rail nonce, cross-chain replay, WebSocket upgrade bypass, burst 50 unpaid, chunked encoding bypass, nonce entropy | ~$0.01 |
+| P18   | CDP Facilitator    | PayAI health + Base mainnet + Bazaar extension, CDP auth-gated, 402 wallet/network/asset/version consistency across tools, MPP dual-rail header, health/catalog/free/paid architecture checks, facilitator TLS, wallet constant | $0 |
+| P19   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
 
 **Total estimated cost:** ~$0.07 per full run.
 
@@ -173,7 +174,7 @@ Reports are saved to `reports/` directory (git-ignored). Each run creates:
   "server": "https://apibase.pro",
   "score": 85,
   "grade": "B",
-  "assertions": { "total": 800, "pass": 770, "fail": 30 },
+  "assertions": { "total": 920, "pass": 890, "fail": 30 },
   "financial": { "x402": 0.05, "mpp": 0.01 },
   "errors": [],
   "recommendations": [],
@@ -217,29 +218,40 @@ Both protocols can coexist on the same server — this tester verifies both work
 | Category | Tests | What it looks for |
 |----------|-------|-------------------|
 | **Payment Replay** | 5 | Reused payment signatures (same tool, cross-tool, modified body) |
-| **Double-Spend** | 1 | 10 parallel requests with same payment → max 1 success |
-| **Amount Manipulation** | 5 | Zero, negative, underpay, tampered payTo, float precision |
-| **SSRF** | 4 | AWS/GCP metadata, localhost, file:// protocol via URL-accepting tools |
+| **Double-Spend** | 2 | 10 + 100 parallel requests with same payment |
+| **Amount Manipulation** | 8 | Zero, negative, underpay, tampered payTo, float precision, integer overflow (2^64), off-by-one (999 vs 1000), wrong network (testnet→mainnet) |
+| **SSRF** | 7 | AWS/GCP metadata, localhost, file://, IPv6 `[::1]`, octal `0177.0.0.1`, decimal `2130706433` |
 | **Timing Attacks** | 2 | Valid vs invalid key timing differential |
-| **CORS** | 3 | Evil origin reflection, null origin, preflight with credentials |
-| **Header Injection** | 3 | CRLF in auth, 64KB header, Host override |
+| **CORS** | 5 | Evil origin, null origin, preflight with credentials, subdomain confusion, expose-headers audit |
+| **Header Injection** | 4 | CRLF in auth, 64KB header, Host override, request smuggling (CL+TE) |
 | **Fuzz** | 5 | Null bytes, unicode, JSON bomb, prototype pollution, MAX_SAFE_INTEGER |
+| **XXE/SSTI** | 4 | XML entity injection, template injection `{{7*7}}`, `${7*7}`, `<%= %>` |
 | **Brute Force** | 3 | 50 random keys, XFF bypass, lockout recovery |
-| **SSL/TLS** | 3 | Protocol version, cipher strength, certificate expiry |
-| **Enumeration** | 3 | Uniform errors, hidden endpoints, tool ID injection |
-| **Response Analysis** | 3 | Stack trace leaks, X-Powered-By, Server header |
-| **MCP Session Abuse** | 2 | Payment enforcement per MCP tools/call, batch abuse |
-| **Cache Leak** | 2 | Cross-key data leak, cache headers (no-store/Vary) |
+| **IP Spoofing** | 5 | X-Real-IP, X-Client-IP, CF-Connecting-IP, True-Client-IP, Forwarded |
+| **SSL/TLS** | 4 | Protocol version, cipher strength, certificate expiry, TLSv1.1 rejection |
+| **Enumeration** | 4 | Uniform errors, hidden endpoints (+10 paths), tool ID injection, path traversal |
+| **Response Analysis** | 4 | Stack trace leaks, X-Powered-By, Server header, internal path leakage |
+| **MCP Session** | 4 | Payment enforcement, batch abuse, session fixation, oversized payload |
+| **Cache** | 4 | Cross-key leak, cache headers, cache poisoning (X-Forwarded-Host), cache key collision |
 | **Signed Underpayment** | 1 | Valid signature with tampered amount |
 | **Cross-Tool Price** | 1 | Cheap tool payment used for expensive tool |
+| **Cross-Chain Replay** | 2 | Tempo nonce as x402, cross-chain payment proof |
 | **Double-Spend 100x** | 1 | 100 parallel requests with single payment |
 | **Replay After Delay** | 1 | Same payment replayed after 30 seconds |
+| **Expired Challenge** | 1 | Payment with maxTimeoutSeconds=0 |
 | **Proto Pollution** | 1 | `__proto__.isPaid=true` bypass attempt |
-| **Header Duplication** | 2 | Mixed case, duplicate X-PAYMENT headers |
+| **HTTP Method Override** | 3 | X-HTTP-Method-Override, X-HTTP-Method, X-Method-Override |
 | **Content-Type Bypass** | 3 | text/plain, text/xml, multipart with payment check |
-| **Cross-Rail Nonce** | 1 | x402 nonce presented as MPP credential |
+| **WebSocket Bypass** | 1 | Upgrade: websocket to bypass HTTP payment middleware |
+| **Chunked Encoding** | 1 | Transfer-Encoding: chunked to bypass payment check |
+| **Burst Attack** | 1 | 50 unpaid requests in 100ms — none should return 200 |
+| **Nonce Entropy** | 2 | Challenge nonce uniqueness + minimum length (≥20 chars) |
 | **Session Entropy** | 1 | Session IDs >= 128-bit, unpredictable |
-| **Price Consistency** | 1 | Catalog price matches 402 challenge for all tools |
+| **Rate Limit** | 1 | Per-key not per-IP (one abuser doesn't block others) |
+| **Batch Injection** | 2 | Recursive batch, path traversal in tool_id |
+| **ReDoS** | 1 | 50K-char input within 5s timeout |
+| **CDP Facilitator** | 16 | PayAI/CDP health, wallet consistency, network/USDC/version, Bazaar, facilitator TLS |
+| **Price Consistency** | 10 | Catalog price matches 402 challenge for 10 tools |
 
 ### Verify yourself
 
@@ -287,7 +299,8 @@ mcp-protocol-tester/
 │   │   ├── 16-platform-features.js# P15: Usage Analytics, Tool Quality, Batch API
 │   │   ├── 17-agent-experience.js # P16: Bootstrap, descriptions, errors, E2E lifecycle
 │   │   ├── 18-payment-bypass.js   # P17: Anti-abuse, replay, double-spend, cache leak
-│   │   └── 15-report.js           # P18: Grade, breakdown, export
+│   │   ├── 19-cdp-facilitator.js  # P18: CDP/PayAI dual-facilitator, wallet consistency
+│   │   └── 15-report.js           # P19: Grade, breakdown, export
 │   ├── lib/
 │   │   ├── config.js              # dotenv + env loader
 │   │   ├── http.js                # HTTP client with timeout + provider delays
