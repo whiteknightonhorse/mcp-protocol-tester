@@ -92,7 +92,11 @@ async function main() {
   if (config.phaseEnabled(15)) await phase15(scorer, config, context);
   if (config.phaseEnabled(16)) await phase16(scorer, config, context);
   if (config.phaseEnabled(17)) await phase17(scorer, config, context);
-  if (config.phaseEnabled(18)) await phase18(scorer, config, context);
+  if (config.phaseEnabled(18)) {
+    // Cooldown before CDP tests — rate limit may be exhausted after P0-P17 scans
+    await new Promise(r => setTimeout(r, 3000));
+    await phase18(scorer, config, context);
+  }
 
   // Report: Always generate
   const totalTime = Math.round((Date.now() - t0) / 1000);

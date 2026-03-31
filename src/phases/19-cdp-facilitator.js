@@ -71,7 +71,9 @@ module.exports = async function phase19(scorer, config, context) {
   // ══════════════════════════════════════════════════════════════
   //  Group 2: 402 Response Integrity (6 tests)
   // ══════════════════════════════════════════════════════════════
-  console.log('\n  --- 402 Response Integrity ---');
+  console.log('\n  (waiting 5s for rate limit cooldown after earlier phases...)');
+  await sleep(5000);
+  console.log('  --- 402 Response Integrity ---');
 
   // Probe 3 paid tools from different providers
   const probeTools = ['crypto.trending', 'earthquake.feed', 'books.search'];
@@ -82,9 +84,19 @@ module.exports = async function phase19(scorer, config, context) {
   let mppHeaders = [];
 
   for (const toolId of probeTools) {
-    const r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
+    let r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
       method: 'POST', headers: AUTH, body: '{}',
     });
+
+    // Retry on rate limit (server returns 400 or 429 when limit exhausted)
+    if (r.status === 400 || r.status === 429) {
+      await drain(r);
+      console.log(`    rate limited on ${toolId}, waiting 10s...`);
+      await sleep(10000);
+      r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
+        method: 'POST', headers: AUTH, body: '{}',
+      });
+    }
 
     if (r.status === 402) {
       const wwwAuth = r.headers?.get?.('www-authenticate') || '';
