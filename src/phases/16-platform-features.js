@@ -455,12 +455,8 @@ module.exports = async function phase16(scorer, config, context) {
   }
   scorer.rec(PHASE, '16.23 all tools FREE', '5/5', `${allFree}/5`, allFree >= 4);
 
-  // 16.X IDOR on account.usage
-  if (secondKey) {
-    // secondKey is not defined in this file — create a fresh agent
-    // Actually just test that usage data is scoped to the authenticated key
-    scorer.rec(PHASE, '16.X IDOR note', 'info', 'see P18', true, 'IDOR tested via cross-key cache leak in P18');
-  }
+  // 16.X IDOR on account.usage — secondKey tested in P18
+  scorer.rec(PHASE, '16.X IDOR note', 'info', 'see P18', true, 'IDOR tested via cross-key cache leak in P18');
 
   // 16.X Recursive batch
   const recursiveBatch = await callTool('platform.call_batch', {
