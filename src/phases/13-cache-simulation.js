@@ -148,13 +148,15 @@ module.exports = async function phase13(scorer, config, context) {
     hasErrorField, `keys: ${Object.keys(errBody).join(',')}`);
 
   // 13.X Cache poisoning via X-Forwarded-Host
+  const poisonMarker = 'xfh-test-' + Date.now(); // unique marker, not a URL
   const poisonRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
     method: 'POST',
-    headers: { ...AUTH, 'X-Forwarded-Host': 'evil.com', 'X-Original-URL': '/admin' },
+    headers: { ...AUTH, 'X-Forwarded-Host': poisonMarker, 'X-Original-URL': '/admin' },
     body: '{}',
   });
   let poisonBody = ''; try { poisonBody = await poisonRes.text(); } catch {}
-  const poisoned = poisonBody.includes('evil.com');
+  // Check if injected marker appears in response (exact match, not URL substring)
+  const poisoned = poisonBody.indexOf(poisonMarker) !== -1;
   scorer.rec(PHASE, '13.X cache poisoning', 'no reflection', poisoned ? 'REFLECTED' : 'safe',
     !poisoned, poisoned ? 'X-Forwarded-Host reflected — cache poisoning risk!' : 'headers not reflected');
   await sleep(200);
