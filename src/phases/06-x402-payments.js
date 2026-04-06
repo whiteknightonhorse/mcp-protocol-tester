@@ -23,8 +23,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 module.exports = async function phase6(scorer, config, context) {
   console.log('\n--- Phase 6: x402 Payments ---');
 
-  if (config.skipPayments) {
-    scorer.rec(PHASE, 'x402-payments', 'skipped', 'skipped', true, 'SKIP_PAYMENTS=true');
+  if (config.skipPayments || !config.privateKey) {
+    scorer.skip(PHASE, config.skipPayments ? 'SKIP_PAYMENTS=true' : 'no PRIVATE_KEY — payment phases skipped');
     return;
   }
 

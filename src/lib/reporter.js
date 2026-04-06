@@ -22,7 +22,7 @@ function generateReport(scorer, meta) {
   w('  ' + ts);
   w('='.repeat(76));
 
-  const { pts, total, grade, bp } = scorer.computeGrade(WEIGHTS);
+  const { pts, total, grade, bp, skippedPhases } = scorer.computeGrade(WEIGHTS);
 
   w(`\nServer: ${meta.serverUrl} | Tools: ${meta.toolCount || '?'}`);
   w(`Assertions: ${scorer.all.length} | Pass: ${scorer.pass.length} | Fail: ${scorer.fail.length}`);
@@ -36,7 +36,13 @@ function generateReport(scorer, meta) {
     'Platform Features', 'Platform Features', 'Agent Experience', 'Payment Bypass',
     'CDP Facilitator', 'Report',
   ];
-  pts.forEach(([, v, mx], i) => w(`  ${(labels[i] || '?').padEnd(24)} ${v}/${mx}`));
+  pts.forEach(([id, v, mx, skip], i) => {
+    if (skip === 'SKIP') w(`  ${(labels[i] || '?').padEnd(24)} [SKIP]`);
+    else w(`  ${(labels[i] || '?').padEnd(24)} ${v}/${mx}`);
+  });
+  if (skippedPhases && skippedPhases.length > 0) {
+    w(`  ${'Skipped'.padEnd(24)} ${skippedPhases.join(', ')}`);
+  }
   w(`  ${'Total'.padEnd(24)} ${total}/100`);
   w(`  ${'Grade'.padEnd(24)} ${grade}`);
 
@@ -71,6 +77,11 @@ function generateReport(scorer, meta) {
   // Per-phase details
   for (let i = 0; i <= 20; i++) {
     const id = `P${i}`;
+    if (skippedPhases && skippedPhases.includes(id)) {
+      w(''); hr(); w(`PHASE ${i}: ${labels[i] || '?'} [SKIP]`); hr();
+      w('  Skipped — no PRIVATE_KEY or SKIP_PAYMENTS=true');
+      continue;
+    }
     const items = scorer.all.filter(t => t.phase === id);
     if (items.length === 0) continue;
     const p = bp[id] || { pass: 0, total: 0 };

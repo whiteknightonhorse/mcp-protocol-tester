@@ -19,6 +19,13 @@ class Scorer {
     this.all = [];
     this.errors = [];
     this.recommendations = [];
+    this.skippedPhases = new Set(); // phases skipped (not counted in score)
+  }
+
+  // Mark entire phase as SKIP (not counted in score denominator)
+  skip(phase, reason = '') {
+    this.skippedPhases.add(phase);
+    process.stdout.write(`  [SKIP] ${phase} — ${reason}\n`);
   }
 
   rec(phase, name, exp, got, ok, det = '') {
@@ -56,12 +63,21 @@ class Scorer {
       if (t.ok) bp[t.phase].pass++;
     }
     const pr = (id) => {
+      if (this.skippedPhases.has(id)) return -1; // -1 = skipped
       const p = bp[id];
-      if (!p || p.total === 0) return 0; // skipped phases score 0, not 100%
+      if (!p || p.total === 0) return 0;
       return Math.min(1, p.pass / p.total);
     };
-    const pts = weights.map(([id, wt]) => [id, Math.round(pr(id) * wt), wt]);
-    const total = pts.reduce((s, [, v]) => s + v, 0);
+    // Skipped phases: earned=0, max=0 (excluded from denominator)
+    const pts = weights.map(([id, wt]) => {
+      const ratio = pr(id);
+      if (ratio === -1) return [id, 0, 0, 'SKIP']; // skipped
+      return [id, Math.round(ratio * wt), wt, null];
+    });
+    const earnedTotal = pts.reduce((s, [, v]) => s + v, 0);
+    const maxTotal = pts.reduce((s, [,, mx]) => s + mx, 0);
+    // Score as percentage of achievable points (excluding skipped)
+    const total = maxTotal > 0 ? Math.round(earnedTotal / maxTotal * 100) : 0;
 
     const has500 = this.errors.filter(e => e.sev === 'CRITICAL').length;
     let grade;
@@ -76,7 +92,7 @@ class Scorer {
     else if (total >= 60) grade = 'D';
     else grade = 'F';
 
-    return { pts, total, grade, bp };
+    return { pts, total, grade, bp, earnedTotal, maxTotal, skippedPhases: [...this.skippedPhases] };
   }
 }
 

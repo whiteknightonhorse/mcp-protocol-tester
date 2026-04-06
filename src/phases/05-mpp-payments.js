@@ -23,14 +23,14 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 module.exports = async function phase5(scorer, config, context) {
   console.log('\n--- Phase 5: MPP Payments ---');
 
-  if (config.skipPayments) {
-    scorer.rec(PHASE, 'mpp-payments', 'skipped', 'skipped', true, 'SKIP_PAYMENTS=true');
+  if (config.skipPayments || !config.privateKey) {
+    scorer.skip(PHASE, config.skipPayments ? 'SKIP_PAYMENTS=true' : 'no PRIVATE_KEY — payment phases skipped');
     return;
   }
 
   const mpp = getMppClient();
   if (!mpp) {
-    scorer.rec(PHASE, 'mpp-payments', 'client', 'no-client', false, 'MPP client not initialized');
+    scorer.skip(PHASE, 'MPP client not initialized (no wallet)');
     return;
   }
 
