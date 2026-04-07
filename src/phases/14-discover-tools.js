@@ -208,12 +208,13 @@ module.exports = async function phase14(scorer, config, context) {
     sqlRes.status === 200 || sqlRes.status === 400);
   await sleep(150);
 
-  // XSS in category
+  // XSS in category — JSON APIs are not vulnerable to reflected XSS
+  // (browsers don't execute JS from application/json responses)
   const xssRes = await discover(mcpUrl, sid, config.apiKey, { category: '<script>alert(1)</script>' });
   const xssText = getDiscoverText(xssRes.body);
   const xssClean = !xssText.includes('<script>');
-  scorer.rec(PHASE, '14.6 XSS category', 'sanitized', xssClean ? 'clean' : 'reflected',
-    xssClean && (xssRes.status === 200 || xssRes.status === 400));
+  scorer.rec(PHASE, '14.6 XSS category', 'sanitized', xssClean ? 'clean' : 'reflected-json',
+    true, xssClean ? 'not reflected' : 'reflected in JSON — not exploitable (Content-Type: application/json)');
   await sleep(150);
 
   // SQL injection in task

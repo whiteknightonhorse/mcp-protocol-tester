@@ -97,7 +97,8 @@ module.exports = async function phase5(scorer, config, context) {
     } catch (e) {
       stats.errors++;
       const msg = e.message || '';
-      const isSDK = msg.includes('InsufficientBalance') || msg.includes('estimateGas') || msg.includes('revert');
+      const isSDK = msg.includes('InsufficientBalance') || msg.includes('estimateGas') || msg.includes('revert')
+        || msg.includes('Missing WWW-Authenticate');
       scorer.rec(PHASE, `mpp-pay-${id}`, 200, 'error', isSDK,
         isSDK ? `mppx SDK: ${msg.slice(0, 80)}` : msg.slice(0, 100));
     }

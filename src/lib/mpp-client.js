@@ -6,7 +6,7 @@ function initMPP(privateKey) {
     const { privateKeyToAccount } = require('viem/accounts');
     const { Mppx, tempo } = require('mppx/client');
     const account = privateKeyToAccount(privateKey);
-    _mppClient = Mppx.create({ methods: [tempo({ account })] });
+    _mppClient = Mppx.create({ polyfill: false, methods: [tempo({ account })] });
     return true;
   } catch (e) {
     console.log(`  MPP init failed: ${e.message}`);

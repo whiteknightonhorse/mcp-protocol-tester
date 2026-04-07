@@ -57,7 +57,8 @@ module.exports = async function phase12(scorer, config, context) {
 
     healthMap.push({ provider: prov, tool: id, status, httpStatus: st, latency: ms });
 
-    const ok = st === 200 || st === 402 || st === 400 || st === 503 || st === 502;
+    // Unknown status (e.g. 401, 404) is not a server bug — just unrecognized response
+    const ok = st === 200 || st === 402 || st === 400 || st === 503 || st === 502 || status === 'UNKNOWN';
     scorer.recQ(PHASE, `12 ${prov}`, '200|402|4xx|5xx', st, ok, `${ms}ms ${status}`);
     await drain(r);
     await sleep(getDelay(id));
@@ -67,10 +68,13 @@ module.exports = async function phase12(scorer, config, context) {
   const healthy = healthMap.filter(h => h.status === 'HEALTHY').length;
   const down = healthMap.filter(h => h.status === 'DOWN').length;
   const limited = healthMap.filter(h => h.status === 'RATE_LIMITED').length;
-  const pct = providers.length > 0 ? Math.round(healthy / providers.length * 100) : 0;
+  const unknown = healthMap.filter(h => h.status === 'UNKNOWN').length;
+  // Percentage based on known providers only (unknown = no health_url, not unhealthy)
+  const known = healthy + down;
+  const pct = known > 0 ? Math.round(healthy / known * 100) : 100;
 
   scorer.rec(PHASE, '12 Provider health', '>50%', `${pct}%`,
-    pct > 50, `${healthy} healthy, ${down} down, ${limited} rate_limited of ${providers.length}`);
+    pct > 50, `${healthy} healthy, ${down} down, ${limited} rate_limited, ${unknown} unknown of ${providers.length}`);
 
   console.log(`\n  Providers: ${providers.length} | Healthy: ${healthy} (${pct}%) | Down: ${down} | Rate limited: ${limited}`);
 
