@@ -71,12 +71,17 @@ module.exports = async function phase12(scorer, config, context) {
   const unknown = healthMap.filter(h => h.status === 'UNKNOWN').length;
   // Percentage based on known providers only (unknown = no health_url, not unhealthy)
   const known = healthy + down;
-  const pct = known > 0 ? Math.round(healthy / known * 100) : 100;
+  const pct = known > 0 ? Math.round(healthy / known * 100) : 0;
+
+  if (unknown > providers.length * 0.8) {
+    scorer.addRec('RELIABILITY', 'P12: >80% providers UNKNOWN',
+      'Most providers returned unrecognized status — check API_KEY configuration');
+  }
 
   scorer.rec(PHASE, '12 Provider health', '>50%', `${pct}%`,
     pct > 50, `${healthy} healthy, ${down} down, ${limited} rate_limited, ${unknown} unknown of ${providers.length}`);
 
-  console.log(`\n  Providers: ${providers.length} | Healthy: ${healthy} (${pct}%) | Down: ${down} | Rate limited: ${limited}`);
+  console.log(`\n  Providers: ${providers.length} | Healthy: ${healthy} (${pct}%) | Down: ${down} | Rate limited: ${limited} | Unknown: ${unknown}`);
 
   // Store for report
   context.healthMap = healthMap;

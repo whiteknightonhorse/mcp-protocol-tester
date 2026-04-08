@@ -215,6 +215,10 @@ module.exports = async function phase14(scorer, config, context) {
   const xssClean = !xssText.includes('<script>');
   scorer.rec(PHASE, '14.6 XSS category', 'sanitized', xssClean ? 'clean' : 'reflected-json',
     true, xssClean ? 'not reflected' : 'reflected in JSON — not exploitable (Content-Type: application/json)');
+  if (!xssClean) {
+    scorer.addRec('SECURITY', 'P14 XSS: input reflected in JSON response',
+      'Server should sanitize <script> tags even in JSON — defense in depth');
+  }
   await sleep(150);
 
   // SQL injection in task
