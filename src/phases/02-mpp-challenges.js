@@ -40,10 +40,10 @@ module.exports = async function phase2(scorer, config, context) {
     const status = r.status;
     await drain(r);
 
-    if (status === 503) {
+    if (status === 502 || status === 503) {
       stats.unavailable503++;
-      // 503 = provider unavailable, not a server bug
-      scorer.recQ(PHASE, `mpp-${id}`, '402|503', status, true, 'provider unavailable');
+      // 502/503 = upstream/provider error, not a server bug
+      scorer.recQ(PHASE, `mpp-${id}`, '402|502|503', status, true, 'upstream/provider error');
       continue;
     }
 

@@ -44,10 +44,10 @@ module.exports = async function phase3(scorer, config, context) {
 
     const status = r.status;
 
-    if (status === 503) {
+    if (status === 502 || status === 503) {
       stats.unavailable503++;
       await drain(r);
-      scorer.recQ(PHASE, `x402-${id}`, '402|503', status, true, 'provider unavailable');
+      scorer.recQ(PHASE, `x402-${id}`, '402|502|503', status, true, 'upstream/provider error');
       await sleep(getDelay(id));
       continue;
     }

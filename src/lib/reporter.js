@@ -52,8 +52,9 @@ function generateReport(scorer, meta) {
   w(`  MPP spent (Tempo):   $${(meta.spentMPP || 0).toFixed(4)}`);
   w(`  Total:               $${((meta.spentX402 || 0) + (meta.spentMPP || 0)).toFixed(4)}`);
 
-  // 500 errors
-  const all500 = scorer.all.filter(t => t.got === '500');
+  // 500 errors — only count failed tests where got is exactly '500' (HTTP status)
+  // Exclude passing tests (e.g. catalog-count=500 is a tool count, not HTTP 500)
+  const all500 = scorer.all.filter(t => t.got === '500' && !t.ok);
   w(''); hr(); w(`500 SERVER ERRORS (${all500.length})`); hr();
   if (all500.length === 0) w('  None');
   else for (const f of all500) w(`  [${f.phase}] ${f.name}: ${f.det}`);

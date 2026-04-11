@@ -107,10 +107,14 @@ module.exports = async function phase7(scorer, config, context) {
   // 12. SQL injection in tool ID
   const sqli = "'; DROP TABLE tools; --";
   const r12 = await sf(`${config.apiUrl}/tools/${encodeURIComponent(sqli)}/call`, postOpts());
-  const sqliSafe = r12.status === 400 || r12.status === 404 || r12.status === 422;
-  expectStatus(scorer, 'sql-injection-tool-id', [400, 404, 422], r12.status,
-    sqliSafe ? 'properly rejected' : 'SUSPICIOUS response');
-  await drain(r12);
+  // Any 4xx means injection was rejected (400, 401, 403, 404, 422 are all safe)
+  // Only fail if response indicates SQL was actually executed (200 with DB data, or SQL error message)
+  const sqliBody = await r12.text().catch(() => '');
+  const sqlErrorIndicators = /sql|syntax error|table.*tools|column|SELECT|INSERT|DROP/i;
+  const sqliExecuted = r12.status === 200 || (r12.status >= 500 && sqlErrorIndicators.test(sqliBody));
+  const sqliSafe = !sqliExecuted && r12.status >= 400 && r12.status < 500;
+  scorer.rec(PHASE, 'sql-injection-tool-id', '4xx (rejected)', String(r12.status), sqliSafe,
+    sqliSafe ? 'properly rejected' : (sqliExecuted ? 'SQL MAY HAVE EXECUTED' : 'SUSPICIOUS response'));
 
   // 13. HTTP method enforcement
   const AUTH = { 'Content-Type': 'application/json' };

@@ -435,16 +435,20 @@ module.exports = async function phase9(scorer, config, context) {
     !xxeText.includes('root:'), xxeText.includes('root:') ? 'XXE EXPLOIT!' : 'safe');
   await sleep(200);
 
-  // 9.X SSTI payloads
+  // 9.X SSTI payloads — use unique result (1337) to avoid false positives from
+  // prices/counts naturally containing "49" in 402 or other non-200 responses
   console.log('  9.X SSTI...');
-  const sstiPayloads = ['{{7*7}}', '${7*7}', '<%= 7*7 %>'];
+  const sstiPayloads = ['{{7*191}}', '${7*191}', '<%= 7*191 %>'];
   for (const payload of sstiPayloads) {
     const r = await sf(`${config.apiUrl}/tools/books.search/call`, {
       method: 'POST', headers: AUTH, body: JSON.stringify({ query: payload }),
     });
     const body = await r.text().catch(() => '');
-    scorer.rec(PHASE, `9.X SSTI ${payload.slice(0,6)}`, 'no 49', body.includes('49') ? 'EXECUTED' : r.status,
-      !body.includes('49') || body.includes('query'), 'template injection check');
+    // Non-200 = request rejected before any template processing → safe
+    // 200 with "1337" in body = template was evaluated → dangerous
+    const executed = r.status === 200 && body.includes('1337');
+    scorer.rec(PHASE, `9.X SSTI ${payload.slice(0,8)}`, 'not executed', executed ? 'EXECUTED' : r.status,
+      !executed, 'template injection check');
     await sleep(200);
   }
 
