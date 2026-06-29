@@ -459,7 +459,7 @@ module.exports = async function phase18(scorer, config, context) {
   const tempoFake = Buffer.from(JSON.stringify({
     scheme: 'exact', amount: '1000', network: 'tempo:4217',
     asset: '0x20C000000000000000000000b9537d11c60E8b50',
-    payTo: '0x183fFa1335EB66858EebCb86F651f70632821f8d',
+    payTo: '0x9E29FF84B0f3EDa9756262d2F950C435495BA8cC',
   })).toString('base64');
   const ccRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
     method: 'POST',

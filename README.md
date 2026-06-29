@@ -47,7 +47,7 @@ npm test
 ## Usage
 
 ```bash
-# Full dual-rail test (all 16 phases)
+# Full dual-rail test (all 20 phases)
 npm test
 
 # Dry run — no real payments, tests challenges and security only

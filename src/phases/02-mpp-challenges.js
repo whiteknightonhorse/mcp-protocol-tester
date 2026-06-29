@@ -71,7 +71,7 @@ module.exports = async function phase2(scorer, config, context) {
 
         // Challenge field validation
         if (parsed.decoded) {
-          const EXPECTED_RECIPIENT = '0x183fFa1335EB66858EebCb86F651f70632821f8d';
+          const EXPECTED_RECIPIENT = '0x9E29FF84B0f3EDa9756262d2F950C435495BA8cC';
           const recipient = parsed.decoded.recipient;
           if (recipient && recipient.toLowerCase() !== EXPECTED_RECIPIENT.toLowerCase()) {
             scorer.addRec('SECURITY',
