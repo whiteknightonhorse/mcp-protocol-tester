@@ -24,6 +24,23 @@ function expectNotOk(scorer, name, status, det = '') {
   return ok;
 }
 
+// Cache-aware replay check (2026-06-29): the server bills cache-hits-on-replay against the signed
+// payment BY DESIGN (escrow-finalize.stage). So a replay that returns 200 is LEGIT iff it was a
+// cache HIT (X-Cache: HIT). A 200 with X-Cache: MISS = a fresh provider call on a replayed payment
+// = real bypass (CRITICAL). Non-200 = blocked outright = pass.
+function expectReplayBlocked(scorer, name, res, det = '') {
+  const xc = (res.headers && res.headers.get ? (res.headers.get('x-cache') || '') : '').toUpperCase();
+  const is200 = res.status === 200;
+  const ok = !is200 || xc === 'HIT';
+  const got = is200 ? `200 (X-Cache:${xc || 'absent'})` : String(res.status);
+  scorer.rec(PHASE, name, 'block|200+HIT', got, ok, det);
+  if (!ok) {
+    scorer.addError('CRITICAL', PHASE, `${name}: 200 with X-Cache:${xc || 'absent'} (fresh call on replayed payment)`,
+      det, 'Reject replayed/forged payments OR ensure cache-hit replays serve from cache (X-Cache: HIT)');
+  }
+  return ok;
+}
+
 function forgedBase64(amount, payTo) {
   return Buffer.from(JSON.stringify({
     scheme: 'exact',
@@ -114,7 +131,7 @@ module.exports = async function phase8(scorer, config, context) {
             headers: paidHeaders,
             body: trendingBody,
           });
-          expectNotOk(scorer, '8.1 Replay-same-tool', r2.status, 'replayed same payment on same tool');
+          expectReplayBlocked(scorer, '8.1 Replay-same-tool', r2, 'replayed same payment on same tool');
           await drain(r2);
           await sleep(300);
 
@@ -127,7 +144,7 @@ module.exports = async function phase8(scorer, config, context) {
               headers: paidHeaders,
               body: JSON.stringify(getBody(earthquakeTool)),
             });
-            expectNotOk(scorer, '8.1 Replay-cross-tool', r3.status,
+            expectReplayBlocked(scorer, '8.1 Replay-cross-tool', r3,
               `replayed payment on ${eqId}`);
             await drain(r3);
           } else {
@@ -142,7 +159,7 @@ module.exports = async function phase8(scorer, config, context) {
             headers: paidHeaders,
             body: JSON.stringify({ modified: true, extra: 'injected' }),
           });
-          expectNotOk(scorer, '8.1 Replay-modified-body', r4.status,
+          expectReplayBlocked(scorer, '8.1 Replay-modified-body', r4,
             'replayed payment with tampered body');
           await drain(r4);
         }
