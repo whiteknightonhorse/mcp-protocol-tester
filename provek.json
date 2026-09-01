@@ -1,0 +1,13 @@
+{
+  "provek_declaration": "1.0.0",
+  "accountability": {
+    "emergency_stop": {
+      "exists": true,
+      "holder": "operator",
+      "mechanism": "ssh + service stop halts all automated activity for this repository"
+    },
+    "insurance": {
+      "exists": false
+    }
+  }
+}
