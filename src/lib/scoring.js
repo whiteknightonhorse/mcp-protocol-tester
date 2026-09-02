@@ -36,6 +36,7 @@ class Scorer {
     this.recommendations = [];
     this.skippedPhases = new Set(); // phases skipped (not counted in score)
     this.skipReasons = {}; // phase -> reason, so a skip always states its world
+    this.blockedList = []; // BLOCKED(<world>) entries — see blocked() below
   }
 
   // Mark entire phase as SKIP (not counted in score denominator)
@@ -43,6 +44,22 @@ class Scorer {
     this.skippedPhases.add(phase);
     this.skipReasons[phase] = reason;
     process.stdout.write(`  [SKIP] ${phase} — ${reason}\n`);
+  }
+
+  // A single assertion that is neither pass nor fail, for a PROVEN reason
+  // named at the call site (`world`) — NOT the generic phase-level SKIP.
+  // "A return that means two worlds" (Fable, 2026-09-02): "the server
+  // correctly refused" and "the rail doesn't exist" must never collapse
+  // into the same PASS again under a new name. Never call this for "the
+  // call failed and I'm not sure why" — that is a FAIL. Only call it when
+  // the caller has actual evidence (e.g. a live "InsufficientBalance"
+  // string in the response/exception) for a specific, named world. Does
+  // NOT enter this.all — zero effect on score/verdict, same as skip().
+  blocked(phase, name, world, det = '') {
+    const entry = { phase, name, world, det: sanitize(det) };
+    this.blockedList.push(entry);
+    process.stdout.write(`  [BLOCKED:${world}] ${name} — ${entry.det}\n`);
+    return entry;
   }
 
   rec(phase, name, exp, got, ok, det = '') {

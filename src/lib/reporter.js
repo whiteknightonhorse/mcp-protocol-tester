@@ -80,6 +80,13 @@ function generateReport(scorer, meta) {
   if (all500.length === 0) w('  None');
   else for (const f of all500) w(`  [${f.phase}] ${f.name}: ${f.det}`);
 
+  // BLOCKED(<world>) — neither pass nor fail, for a proven reason (see
+  // scoring.js's blocked()). Visible but doesn't touch score/verdict.
+  if (scorer.blockedList && scorer.blockedList.length > 0) {
+    w(''); hr(); w(`BLOCKED (${scorer.blockedList.length})`); hr();
+    for (const b of scorer.blockedList) w(`  [${b.phase}] ${b.name} — world=${b.world} — ${b.det}`);
+  }
+
   // Errors
   if (scorer.errors.length > 0) {
     w(''); hr(); w(`ERRORS (${scorer.errors.length})`); hr();
@@ -144,6 +151,7 @@ function generateReport(scorer, meta) {
     assertions: { total: scorer.all.length, pass: scorer.pass.length, fail: scorer.fail.length },
     financial: { x402: meta.spentX402 || 0, mpp: meta.spentMPP || 0 },
     errors: scorer.errors, recommendations: scorer.recommendations,
+    blocked: scorer.blockedList || [],
     failures: allFails.map(f => ({ phase: f.phase, name: f.name, expected: f.exp, got: f.got, detail: f.det, red: !!f.red })),
   }, null, 2), 'utf-8');
   console.log(`JSON report saved to ${jsonFile}`);
