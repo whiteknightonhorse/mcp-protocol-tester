@@ -183,10 +183,14 @@ jobs:
           #     server under test. This is the one deliberate exception
           #     inside src/: reviewed because the input reaching execFile's
           #     argv is always our own fixed test payload, not a server
-          #     response. A NEW child_process use anywhere else (src/ or
-          #     scripts/) still fails this gate, as it should.
+          #     response.
+          #   - scripts/test-p2-mutation.js (same audit): execFile('node',
+          #     [...]) with a static argv array, same shape as
+          #     test-verdict-fixtures.js — spawns the tester itself.
+          # A NEW child_process use anywhere else (src/ or scripts/) still
+          # fails this gate, as it should.
           if grep -rn "child_process\|require.*child\|\.execSync(" --include="*.js" --exclude-dir=node_modules . | \
-            grep -v "scripts/internal-truth\.js\|scripts/test-verdict-fixtures\.js\|src/lib/http\.js"; then
+            grep -v "scripts/internal-truth\.js\|scripts/test-verdict-fixtures\.js\|src/lib/http\.js\|scripts/test-p2-mutation\.js"; then
             echo "::error::Found child_process usage — potential command injection!"
             SUSPICIOUS=$((SUSPICIOUS + 1))
           fi
