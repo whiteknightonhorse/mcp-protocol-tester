@@ -102,14 +102,20 @@ module.exports = async function phase17(scorer, config, context) {
   scorer.rec(PHASE, '17.6 descriptions unique', '>95%', `${uniquePct}%`,
     uniquePct > 90, `${descSet.size} unique out of ${sampleSize}`);
 
-  // 17.7 Description length 10-500
+  // 17.7 Description length 10-500 — a catalog-quality METRIC, not a
+  // pass/fail gate (Fable's audit: an arbitrary 90% threshold against a
+  // description-length heuristic was deciding part of the daily score;
+  // moved to a recommendation so it's visible without being able to fail
+  // the run over marketing-copy style, same treatment as the pre-existing
+  // 17.9/17.x "quality" heuristics below that are already addRec-only).
   let goodLength = 0;
   for (const t of sample) {
     const len = (t.description || '').length;
     if (len >= 10 && len <= 500) goodLength++;
   }
-  scorer.rec(PHASE, '17.7 description length 10-500', '>90%',
-    `${Math.round(goodLength / sampleSize * 100)}%`, goodLength > sampleSize * 0.9);
+  const descLenPct = Math.round(goodLength / sampleSize * 100);
+  scorer.addRec('CATALOG', '17.7 description length 10-500',
+    `${descLenPct}% of sampled tools (${goodLength}/${sampleSize}) have a 10-500 char description`);
 
   // 17.8 Required fields have descriptions in schema
   let fieldsChecked = 0, fieldsWithDesc = 0;
@@ -295,8 +301,18 @@ module.exports = async function phase17(scorer, config, context) {
   // ══════════════════════════════════════════════════════════════
   console.log('  --- 5. Response Consistency ---');
 
-  // 17.20 Response has consistent structure (MCP-standard or {data,metadata} envelope)
-  const envelopeTools = ['earthquake.feed', 'crypto.trending', 'nasa.apod'];
+  // 17.20 Response has consistent structure (MCP-standard or {data,metadata}
+  // envelope). Was a hardcoded 3-tool list called with an unauthenticated/
+  // unpaid request — once any of those 3 tools stops being free (or was
+  // never guaranteed free), the call 402s and the check silently measures
+  // "is this tool paid" instead of "is the response envelope consistent"
+  // (Fable's audit: 0/3, mislabeled as an instrument defect). Pick real
+  // FREE tools from the live catalog instead of a frozen guess.
+  const freeCatalogTools = context.catalog
+    .filter(t => parseFloat(t.pricing?.price_usd ?? t.price_usd ?? '1') === 0)
+    .map(t => t.id || t.name)
+    .slice(0, 3);
+  const envelopeTools = freeCatalogTools.length > 0 ? freeCatalogTools : ['account.usage'];
   let envelopeOk = 0;
   for (const toolId of envelopeTools) {
     const r = await sf(`${config.apiUrl}/tools/${toolId}/call`, {
@@ -311,8 +327,9 @@ module.exports = async function phase17(scorer, config, context) {
     } else { await drain(r); }
     await sleep(300);
   }
-  scorer.rec(PHASE, '17.20 response structure', '3/3', `${envelopeOk}/3`,
-    envelopeOk >= 2, 'consistent parseable response');
+  const envN = envelopeTools.length;
+  scorer.rec(PHASE, '17.20 response structure', `${envN}/${envN}`, `${envelopeOk}/${envN}`,
+    envelopeOk >= Math.ceil(envN * 0.66), `consistent parseable response (tools: ${envelopeTools.join(', ')})`);
 
   // 17.21 metadata has standard fields
   if (metaCheckBody?.metadata) {

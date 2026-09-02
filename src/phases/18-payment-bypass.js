@@ -68,7 +68,7 @@ module.exports = async function phase18(scorer, config, context) {
       scorer.rec(PHASE, '18.1 MCP session payment', 'session', 'no session', true, 'cannot test');
     }
   } catch (e) {
-    scorer.rec(PHASE, '18.1 MCP session payment', 'test', 'error', true, e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '18.1 MCP session payment', 'test', e, e.message.slice(0, 80));
   }
   await sleep(300);
 

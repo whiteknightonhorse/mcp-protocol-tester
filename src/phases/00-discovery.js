@@ -4,6 +4,7 @@
  * registers a fresh agent for scanning.
  */
 const { sf, drain } = require('../lib/http');
+const { pickSafeProbeTool } = require('../utils/assert');
 
 const PHASE = 'P0';
 
@@ -27,13 +28,13 @@ module.exports = async function phase0(scorer, config, context) {
     const data = await r0.json();
     tools = Array.isArray(data) ? data : (data.tools || data.data || []);
   } else {
-    scorer.rec(PHASE, 'catalog-fetch', 200, r0.status, false, 'catalog fetch failed');
+    scorer.redRec(PHASE, 'catalog-fetch', 200, r0.status, false, 'catalog fetch failed');
     await drain(r0);
   }
 
   context.catalog = tools;
   const maxNote = config.maxTools > 0 ? ` (max ${config.maxTools})` : '';
-  scorer.rec(PHASE, 'catalog-count', '>0', tools.length, tools.length > 0,
+  scorer.redRec(PHASE, 'catalog-count', '>0', tools.length, tools.length > 0,
     `${tools.length} tools loaded${maxNote}`);
 
   // Catalog schema validation (spot check first 50 tools)
@@ -62,7 +63,7 @@ module.exports = async function phase0(scorer, config, context) {
 
   // 3. Probe one tool to detect dual-rail (x402 body + WWW-Authenticate: Payment header)
   if (tools.length > 0) {
-    const probe = tools[0];
+    const probe = pickSafeProbeTool(tools);
     const probeUrl = `${config.apiUrl}/tools/${probe.id || probe.name}/call`;
     const probeHeaders = { 'Content-Type': 'application/json' };
     if (config.apiKey) probeHeaders['Authorization'] = `Bearer ${config.apiKey}`;

@@ -4,7 +4,7 @@
  * and error cascade / consistency checks.
  */
 const { sf, drain } = require('../lib/http');
-const { getBody } = require('../utils/assert');
+const { getBody, pickSafeProbeTool } = require('../utils/assert');
 const tls = require('tls');
 
 const PHASE = 'P10';
@@ -26,9 +26,16 @@ module.exports = async function phase10(scorer, config, context) {
     : AUTH;
 
   const catalog = context.catalog;
-  const firstToolId = catalog.length > 0
-    ? (catalog[0].id || catalog[0].name)
-    : 'crypto.trending';
+  // Was `catalog[0]` — whatever tool the API happens to sort first. If that
+  // tool has a required param (common), calling it with an empty/unknown
+  // body fails schema validation with 400 BEFORE any auth/rate-limit logic
+  // even runs — confirmed live (POST abr.abn_lookup + {} -> 400, not a
+  // rate-limit symptom). That is what made 10.1c/10.4a look like the brute
+  // force above had knocked out the key; it hadn't. pickSafeProbeTool()
+  // guarantees a paid tool that accepts {}, so getBody() always returns a
+  // valid call.
+  const probeTool = pickSafeProbeTool(catalog);
+  const firstToolId = probeTool.id || probeTool.name;
   const toolUrl = `${config.apiUrl}/tools/${firstToolId}/call`;
 
   // ========================================================================
@@ -103,16 +110,28 @@ module.exports = async function phase10(scorer, config, context) {
 
   await sleep(500);
 
-  // 10.1c — Valid key after brute force still works
+  // 10.1c — Valid key after brute force still works. If the leaky-bucket
+  // limiter is still draining the burst above, wait for it once and retry
+  // rather than record a false "blocked" — a real block should still be
+  // caught (second attempt), a self-inflicted collision should not be.
   try {
-    const rAfter = await sf(toolUrl, {
+    let rAfter = await sf(toolUrl, {
       method: 'POST',
       headers: ZERO_AUTH,
       body: JSON.stringify(getBody(firstToolId)),
     });
+    if (rAfter.status === 429) {
+      await drain(rAfter);
+      await sleep(5000);
+      rAfter = await sf(toolUrl, {
+        method: 'POST',
+        headers: ZERO_AUTH,
+        body: JSON.stringify(getBody(firstToolId)),
+      });
+    }
     const afterOk = rAfter.status === 200 || rAfter.status === 402;
     scorer.rec(PHASE, '10.1 Post-brute-valid', '200|402', String(rAfter.status), afterOk,
-      afterOk ? 'valid key still works after brute force' : 'valid key blocked (429?)');
+      afterOk ? 'valid key still works after brute force' : `valid key blocked (status ${rAfter.status})`);
     await drain(rAfter);
 
     if (!afterOk && rAfter.status === 429) {
@@ -120,8 +139,7 @@ module.exports = async function phase10(scorer, config, context) {
         'Consider per-key rate limiting instead of per-IP to avoid blocking valid users');
     }
   } catch (e) {
-    scorer.rec(PHASE, '10.1 Post-brute-valid', '200|402', 'error', false,
-      e.message.slice(0, 100));
+    scorer.recCatch(PHASE, '10.1 Post-brute-valid', '200|402', e);
   }
 
   // ========================================================================
@@ -256,8 +274,7 @@ module.exports = async function phase10(scorer, config, context) {
           `Status ${r.status}`, 'Block or remove non-public endpoints');
       }
     } catch (e) {
-      scorer.rec(PHASE, `10.3 Hidden-${path.split('/').pop()}`, '404', 'error', true,
-        e.message.slice(0, 80));
+      scorer.recCatch(PHASE, `10.3 Hidden-${path.split('/').pop()}`, '404', e, e.message.slice(0, 80));
     }
     await sleep(100);
   }
@@ -282,8 +299,7 @@ module.exports = async function phase10(scorer, config, context) {
         ok ? 'rejected' : 'ACCEPTED malicious ID');
       await drain(r);
     } catch (e) {
-      scorer.rec(PHASE, `10.3 Injection`, '!200', 'error', true,
-        e.message.slice(0, 80));
+      scorer.recCatch(PHASE, `10.3 Injection`, '!200', e, e.message.slice(0, 80));
     }
     await sleep(100);
   }
@@ -304,18 +320,26 @@ module.exports = async function phase10(scorer, config, context) {
     await sleep(200);
 
     // Send good request
-    const rGood = await sf(toolUrl, {
+    let rGood = await sf(toolUrl, {
       method: 'POST',
       headers: ZERO_AUTH,
       body: JSON.stringify(getBody(firstToolId)),
     });
+    if (rGood.status === 429) {
+      await drain(rGood);
+      await sleep(5000);
+      rGood = await sf(toolUrl, {
+        method: 'POST',
+        headers: ZERO_AUTH,
+        body: JSON.stringify(getBody(firstToolId)),
+      });
+    }
     const goodOk = rGood.status === 200 || rGood.status === 402;
     scorer.rec(PHASE, '10.4 Recovery-after-bad', '200|402', String(rGood.status), goodOk,
-      goodOk ? 'server recovered after bad request' : 'server impacted by prior bad request');
+      goodOk ? 'server recovered after bad request' : `server impacted by prior bad request (status ${rGood.status})`);
     await drain(rGood);
   } catch (e) {
-    scorer.rec(PHASE, '10.4 Recovery-after-bad', '200|402', 'error', false,
-      e.message.slice(0, 100));
+    scorer.recCatch(PHASE, '10.4 Recovery-after-bad', '200|402', e);
   }
 
   // 10.4b — 10 parallel catalog fetches return same count

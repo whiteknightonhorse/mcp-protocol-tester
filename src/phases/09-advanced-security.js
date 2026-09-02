@@ -97,8 +97,7 @@ module.exports = async function phase9(scorer, config, context) {
             'Block internal network access from tool execution');
         }
       } catch (e) {
-        scorer.rec(PHASE, `9.1 SSRF-${p.label}`, 'no leak', 'error/blocked', true,
-          e.message.slice(0, 80));
+        scorer.recCatch(PHASE, `9.1 SSRF-${p.label}`, 'no leak', e, e.message.slice(0, 80));
       }
       await sleep(300);
     }
@@ -189,8 +188,7 @@ module.exports = async function phase9(scorer, config, context) {
       'ACAO header must not reflect evil origin');
     await drain(rCors);
   } catch (e) {
-    scorer.rec(PHASE, '9.3 CORS-evil-origin', '!evil.com', 'error', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.3 CORS-evil-origin', '!evil.com', e, e.message.slice(0, 80));
   }
 
   // 9.3b — Null origin
@@ -205,8 +203,7 @@ module.exports = async function phase9(scorer, config, context) {
       'ACAO must not be literal "null"');
     await drain(rNull);
   } catch (e) {
-    scorer.rec(PHASE, '9.3 CORS-null-origin', '!null', 'error', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.3 CORS-null-origin', '!null', e, e.message.slice(0, 80));
   }
 
   // 9.3c — Preflight with evil origin + credentials
@@ -227,8 +224,7 @@ module.exports = async function phase9(scorer, config, context) {
       `ACAO=${preAcao} creds=${preCreds}`);
     await drain(rPre);
   } catch (e) {
-    scorer.rec(PHASE, '9.3 CORS-preflight', 'no evil+creds', 'error', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.3 CORS-preflight', 'no evil+creds', e, e.message.slice(0, 80));
   }
 
   // ========================================================================
@@ -252,8 +248,7 @@ module.exports = async function phase9(scorer, config, context) {
     await drain(rCrlf);
   } catch (e) {
     // Node may reject the header at transport level — that is a pass
-    scorer.rec(PHASE, '9.4 CRLF-injection', 'rejected', 'rejected', true,
-      'transport rejected CRLF: ' + e.message.slice(0, 60));
+    scorer.recCatch(PHASE, '9.4 CRLF-injection', 'rejected', e, 'transport rejected CRLF: ' + e.message.slice(0, 60));
   }
 
   // 9.4b — 64KB header value
@@ -272,8 +267,7 @@ module.exports = async function phase9(scorer, config, context) {
       '64KB header value');
     await drain(rBig);
   } catch (e) {
-    scorer.rec(PHASE, '9.4 Large-header', '!500', 'rejected', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.4 Large-header', '!500', e, e.message.slice(0, 80));
   }
 
   // 9.4c — Host header override
@@ -292,8 +286,7 @@ module.exports = async function phase9(scorer, config, context) {
       'Host header set to evil.com');
     await drain(rHost);
   } catch (e) {
-    scorer.rec(PHASE, '9.4 Host-override', '!500', 'rejected', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.4 Host-override', '!500', e, e.message.slice(0, 80));
   }
 
   // ========================================================================
@@ -323,8 +316,7 @@ module.exports = async function phase9(scorer, config, context) {
         ok ? 'handled gracefully' : 'server error');
       await drain(r);
     } catch (e) {
-      scorer.rec(PHASE, `9.5 Fuzz-${tc.label}`, '!500', 'error', true,
-        e.message.slice(0, 80));
+      scorer.recCatch(PHASE, `9.5 Fuzz-${tc.label}`, '!500', e, e.message.slice(0, 80));
     }
     await sleep(100);
   }
@@ -347,8 +339,7 @@ module.exports = async function phase9(scorer, config, context) {
       '1000 nesting levels');
     await drain(rBomb);
   } catch (e) {
-    scorer.rec(PHASE, '9.5 Fuzz-json-bomb', '!500', 'rejected', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.5 Fuzz-json-bomb', '!500', e, e.message.slice(0, 80));
   }
 
   // ========================================================================
@@ -378,8 +369,7 @@ module.exports = async function phase9(scorer, config, context) {
         'Sanitize error responses in production');
     }
   } catch (e) {
-    scorer.rec(PHASE, '9.6 No-stack-trace', 'no trace', 'error', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.6 No-stack-trace', 'no trace', e, e.message.slice(0, 80));
   }
 
   // 9.6b — X-Powered-By not exposed
@@ -399,8 +389,7 @@ module.exports = async function phase9(scorer, config, context) {
       !specificServer,
       specificServer ? `version exposed: ${serverH}` : 'server header is safe');
   } catch (e) {
-    scorer.rec(PHASE, '9.6 No-x-powered-by', '(empty)', 'error', true,
-      e.message.slice(0, 80));
+    scorer.recCatch(PHASE, '9.6 No-x-powered-by', '(empty)', e, e.message.slice(0, 80));
   }
 
   // 9.X SSRF IPv6/octal/decimal

@@ -120,3 +120,30 @@ function getBody(toolOrId) {
 }
 
 module.exports = { shouldSkip, buildBody, getBody, KNOWN_PARAMS, SKIP_IDS };
+
+// A tool with no required params and a non-zero price is always safe to call
+// with an empty body `{}` — it always reaches the real payment-challenge path
+// instead of failing schema validation first (which happens BEFORE the 402
+// challenge — confirmed live: POST /tools/abr.abn_lookup/call with {} and a
+// valid key returns 400 schema_validation_failed, never 402). Several phases
+// used to grab `catalog[0]` directly, which is whatever the API happens to
+// sort first — that turned out to be a tool with a required param, breaking
+// P0s dual-rail-detect AND P10s post-brute/recovery checks the same way
+// (Fable audit 2026-09-02: both were blamed on rate-limiter self-collision;
+// the real cause was this). One helper, every caller that used to inline
+// `catalog[0]` should use this instead.
+function pickSafeProbeTool(catalog, { requirePaid = true } = {}) {
+  const fallback = { id: "crypto.trending", name: "crypto.trending" };
+  if (!Array.isArray(catalog) || catalog.length === 0) return fallback;
+  const noRequired = (t) => !((t.input_schema?.required?.length) > 0);
+  const isPaid = (t) => parseFloat(t.pricing?.price_usd ?? t.price_usd ?? "0") > 0;
+  const paidNoRequired = catalog.filter((t) => noRequired(t) && isPaid(t));
+  if (paidNoRequired.length > 0) return paidNoRequired[0];
+  if (!requirePaid) {
+    const anyNoRequired = catalog.find(noRequired);
+    if (anyNoRequired) return anyNoRequired;
+  }
+  return fallback;
+}
+
+module.exports.pickSafeProbeTool = pickSafeProbeTool;

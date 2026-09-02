@@ -87,7 +87,7 @@ module.exports = async function phase7(scorer, config, context) {
     expectStatus(scorer, 'mcp-fake-session', [400, 401, 403, 404], fakeSession.status,
       'fake MCP session ID');
   } catch (e) {
-    scorer.rec(PHASE, 'mcp-fake-session', 'rejected', 'error', true, e.message);
+    scorer.recCatch(PHASE, 'mcp-fake-session', 'rejected', e, e.message);
   }
 
   // 11. Hidden endpoints

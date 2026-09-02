@@ -370,15 +370,25 @@ module.exports = async function phase16(scorer, config, context) {
   // ══════════════════════════════════════════════════════════════
   console.log('\n  --- Cross-feature tests ---\n');
 
-  // 16.21 New tools in catalog
+  // 16.21 New tools in catalog.
+  // The count here is NOT an arbitrary "6" — it is exactly
+  // Object.keys(PLATFORM_TOOLS).length, i.e. this file's own map right above
+  // (source of truth: apibase's platform/account-analytics tool group,
+  // src/config/tool-definitions.ts on the apibase server). Fable's audit
+  // (2026-09-02) found this had drifted to a fuzzy ">=5 of 6 is fine"
+  // threshold with the total hardcoded as the literal string '6/6' in three
+  // places — if PLATFORM_TOOLS ever grows/shrinks the literal wouldn't
+  // follow, and a genuinely missing tool would still show green. Now: exact
+  // match required, and the denominator always reflects this map's own size.
+  const N = Object.keys(PLATFORM_TOOLS).length;
   const catalogIds = context.catalog.map(t => t.id || t.name);
   const expectedIds = Object.keys(PLATFORM_TOOLS);
   let catalogHits = 0;
   for (const id of expectedIds) {
     if (catalogIds.includes(id)) catalogHits++;
   }
-  scorer.rec(PHASE, '16.21 new tools in catalog', '6/6', `${catalogHits}/6`,
-    catalogHits >= 5, expectedIds.filter(id => !catalogIds.includes(id)).join(', ') || 'all found');
+  scorer.rec(PHASE, '16.21 new tools in catalog', `${N}/${N}`, `${catalogHits}/${N}`,
+    catalogHits === N, expectedIds.filter(id => !catalogIds.includes(id)).join(', ') || 'all found');
 
   // Check each has price_usd = 0
   let freeCount = 0;
@@ -389,8 +399,8 @@ module.exports = async function phase16(scorer, config, context) {
       if (price === 0) freeCount++;
     }
   }
-  scorer.rec(PHASE, '16.21b all platform tools free', '6/6', `${freeCount}/6`,
-    freeCount >= 5);
+  scorer.rec(PHASE, '16.21b all platform tools free', `${N}/${N}`, `${freeCount}/${N}`,
+    freeCount === N);
 
   // Check schemas non-empty
   let schemaCount = 0;
@@ -400,8 +410,8 @@ module.exports = async function phase16(scorer, config, context) {
       schemaCount++;
     }
   }
-  scorer.rec(PHASE, '16.21c schemas non-empty', '6/6', `${schemaCount}/6`,
-    schemaCount >= 5);
+  scorer.rec(PHASE, '16.21c schemas non-empty', `${N}/${N}`, `${schemaCount}/${N}`,
+    schemaCount === N);
 
   // Check call_batch has maxItems: 20
   const batchTool = context.catalog.find(t => (t.id || t.name) === 'platform.call_batch');
