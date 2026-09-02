@@ -3,7 +3,7 @@
  * SSRF probes, timing attacks, CORS policy, header injection,
  * fuzz / input validation, and response analysis.
  */
-const { sf, drain } = require('../lib/http');
+const { sf, drain, diffTransportProbe } = require('../lib/http');
 const { getBody } = require('../utils/assert');
 
 const PHASE = 'P9';
@@ -233,23 +233,22 @@ module.exports = async function phase9(scorer, config, context) {
   console.log('  9.4 Header injection...');
 
   // 9.4a — CRLF in Authorization
-  try {
-    const rCrlf = await sf(toolUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer test\r\nX-Injected: true',
-      },
-      body: JSON.stringify({}),
-    });
-    const okCrlf = rCrlf.status !== 200;
-    scorer.rec(PHASE, '9.4 CRLF-injection', '!200', String(rCrlf.status), okCrlf,
-      'CRLF in Authorization header');
-    await drain(rCrlf);
-  } catch (e) {
-    // Node may reject the header at transport level — that is a pass
-    scorer.recCatch(PHASE, '9.4 CRLF-injection', 'rejected', e, 'transport rejected CRLF: ' + e.message.slice(0, 60));
-  }
+  // undici (fetch) TIMEOUTs on a raw CRLF embedded in a header value even
+  // though the real server answers fast — proven client artifact (Fable's
+  // follow-up audit, 2026-09-02: curl control test, 401 in ~0.03s). curl
+  // (via execFile, no shell) can carry the literal CR/LF bytes in one argv
+  // element; diffTransportProbe() records the undici-vs-curl comparison.
+  const rCrlf = await diffTransportProbe(scorer, PHASE, '9.4 CRLF-injection', toolUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer test\r\nX-Injected: true',
+    },
+    body: JSON.stringify({}),
+  });
+  const okCrlf = rCrlf.status !== 200 && rCrlf.status !== -1;
+  scorer.rec(PHASE, '9.4 CRLF-injection', '!200', String(rCrlf.status), okCrlf,
+    'CRLF in Authorization header');
 
   // 9.4b — 64KB header value
   try {

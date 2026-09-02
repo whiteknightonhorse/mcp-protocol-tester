@@ -3,7 +3,7 @@
  * Tests authentication, authorization, input validation, cross-protocol
  * confusion, and common attack vectors.
  */
-const { sf, drain } = require('../lib/http');
+const { sf, drain, diffTransportProbe } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
 
 const PHASE = 'P7';
@@ -190,15 +190,17 @@ module.exports = async function phase7(scorer, config, context) {
   scorer.rec(PHASE, '7.X expanded hidden endpoints', '0 found', moreFound,
     moreFound === 0, moreFound > 0 ? `${moreFound} exposed!` : 'all blocked');
 
-  // 7.X Request smuggling probe
-  const smuggleRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
-    method: 'POST',
-    headers: { ...AUTH, 'Content-Length': '2', 'Transfer-Encoding': 'chunked' },
-    body: '{}',
-  });
+  // 7.X Request smuggling probe.
+  // undici (fetch) TIMEOUTs on ambiguous Content-Length+Transfer-Encoding
+  // framing even though the real server answers fast — proven client
+  // artifact (Fable's follow-up audit, 2026-09-02: curl control test).
+  // curlRequest() is the transport here; diffTransportProbe() records the
+  // undici-vs-curl comparison as its own assertion.
+  const smuggleRes = await diffTransportProbe(scorer, PHASE, '7.X request smuggling',
+    `${config.apiUrl}/tools/crypto.trending/call`,
+    { method: 'POST', headers: { ...AUTH, 'Content-Length': '2', 'Transfer-Encoding': 'chunked' }, body: '{}' });
   scorer.rec(PHASE, '7.X request smuggling', '!500', smuggleRes.status,
-    smuggleRes.status !== 500, 'ambiguous framing handled');
-  await drain(smuggleRes);
+    smuggleRes.status !== 500 && smuggleRes.status !== -1, 'ambiguous framing handled');
 
   console.log('  Security tests complete');
 };

@@ -3,7 +3,7 @@
  * Tests every known vector for getting paid API data without paying.
  * Simulates a malicious AI agent trying to abuse the payment system.
  */
-const { sf, drain } = require('../lib/http');
+const { sf, drain, diffTransportProbe } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
 const { getX402Client, makeX402Payment } = require('../lib/x402-client');
 
@@ -472,17 +472,22 @@ module.exports = async function phase18(scorer, config, context) {
   await drain(ccRes);
   await sleep(200);
 
-  // 18.X WebSocket upgrade bypass
+  // 18.X WebSocket upgrade bypass.
+  // undici (fetch) TIMEOUTs on Upgrade/Connection headers even though the
+  // real server answers fast — proven client artifact (Fable's follow-up
+  // audit, 2026-09-02: curl control test). curlRequest() is the transport;
+  // diffTransportProbe() records the undici-vs-curl comparison.
+  // 401 added to the accepted set: fixing the transport surfaces the real
+  // status for an unauthenticated/garbage-key call, which is 401, not one
+  // of the payment-enforcement codes this check originally only saw
+  // because it never actually got a real response before.
   console.log('  --- WebSocket upgrade bypass ---');
-  const wsRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
-    method: 'POST',
-    headers: { ...AUTH, 'Upgrade': 'websocket', 'Connection': 'Upgrade' },
-    body: '{}',
-  });
+  const wsRes = await diffTransportProbe(scorer, PHASE, '18.X websocket upgrade',
+    `${config.apiUrl}/tools/crypto.trending/call`,
+    { method: 'POST', headers: { ...AUTH, 'Upgrade': 'websocket', 'Connection': 'Upgrade' }, body: '{}' });
   scorer.rec(PHASE, '18.X websocket upgrade', '!free data', wsRes.status,
-    wsRes.status === 402 || wsRes.status === 400 || wsRes.status === 426,
+    wsRes.status === 402 || wsRes.status === 400 || wsRes.status === 426 || wsRes.status === 401,
     wsRes.status === 200 ? 'CRITICAL: websocket bypass!' : 'payment enforced');
-  await drain(wsRes);
   await sleep(200);
 
   // 18.X Pay once, burst 50 in 100ms
@@ -501,16 +506,13 @@ module.exports = async function phase18(scorer, config, context) {
   for (const r of burstResults) await drain(r);
   await sleep(300);
 
-  // 18.X Transfer-Encoding chunked bypass
-  const teRes = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
-    method: 'POST',
-    headers: { ...AUTH, 'Transfer-Encoding': 'chunked' },
-    body: '{}',
-  });
+  // 18.X Transfer-Encoding chunked bypass — same undici artifact, same fix.
+  const teRes = await diffTransportProbe(scorer, PHASE, '18.X chunked encoding',
+    `${config.apiUrl}/tools/crypto.trending/call`,
+    { method: 'POST', headers: { ...AUTH, 'Transfer-Encoding': 'chunked' }, body: '{}' });
   scorer.rec(PHASE, '18.X chunked encoding', '!free', teRes.status,
     teRes.status === 402 || teRes.status === 400,
     teRes.status === 200 ? 'CRITICAL: chunked encoding bypassed payment!' : 'payment enforced');
-  await drain(teRes);
   await sleep(200);
 
   // 18.X Nonce entropy check
