@@ -10,6 +10,19 @@ const { getBody } = require('../utils/assert');
 const PHASE = 'P2';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
 
+// Source of truth for the challenge-field RED assertions above. Exported so
+// the mutation control (scripts/test-p2-mutation.js) can flip
+// EXPECTED_RECIPIENT to a wrong value and assert the run goes RED, then
+// restore it and assert green — proving the assertion is actually wired,
+// not just present.
+// Overridable via env — this is what the mutation control
+// (scripts/test-p2-mutation.js) flips to a wrong address to prove the RED
+// assertion above is actually wired: real environments never set this, so
+// the override is a no-op everywhere except that one script.
+const EXPECTED_RECIPIENT = process.env.MPP_EXPECTED_RECIPIENT_TEST_OVERRIDE
+  || '0x9E29FF84B0f3EDa9756262d2F950C435495BA8cC';
+const EXPECTED_CHAIN_ID = 4217;
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 module.exports = async function phase2(scorer, config, context) {
@@ -69,29 +82,33 @@ module.exports = async function phase2(scorer, config, context) {
         scorer.recQ(PHASE, `mpp-${id}`, '402+header', '402+header', true,
           `method=${parsed.method || 'n/a'}`);
 
-        // Challenge field validation
+        // Challenge field validation — RED-class (Fable's follow-up audit,
+        // 2026-09-02): the server dictates recipient/amount/chainId in the
+        // 402 challenge BEFORE any payment happens (decoded here from
+        // WWW-Authenticate: Payment's base64 `request` field). "server
+        // advertises someone else's address" is a real theft vector and is
+        // catchable for $0 — it was previously wired to addRec() (a soft
+        // recommendation), so a garbage recipient never failed the run at
+        // all. This is exactly LAW#DECLARED-IS-NOT-WIRED: the check
+        // existed, its verdict went nowhere.
         if (parsed.decoded) {
-          const EXPECTED_RECIPIENT = '0x9E29FF84B0f3EDa9756262d2F950C435495BA8cC';
           const recipient = parsed.decoded.recipient;
-          if (recipient && recipient.toLowerCase() !== EXPECTED_RECIPIENT.toLowerCase()) {
-            scorer.addRec('SECURITY',
-              `${PHASE} mpp-${id}: unexpected recipient`,
-              `expected=${EXPECTED_RECIPIENT} got=${recipient} — verify server payment recipient address`);
-          }
+          const recipientOk = !recipient || recipient.toLowerCase() === EXPECTED_RECIPIENT.toLowerCase();
+          scorer.redRec(PHASE, `${id}: challenge recipient`, EXPECTED_RECIPIENT,
+            recipient || '(none)', recipientOk,
+            recipientOk ? 'matches operator wallet' : 'CRITICAL: server advertised a DIFFERENT recipient before any payment');
 
           const amount = Number(parsed.decoded.amount);
-          if (isNaN(amount) || amount <= 0 || amount >= 1000000) {
-            scorer.addRec('SECURITY',
-              `${PHASE} mpp-${id}: suspicious amount`,
-              `amount=${parsed.decoded.amount} (expected >0 and <1000000 micro-USDC)`);
-          }
+          const amountOk = !isNaN(amount) && amount > 0 && amount < 1000000;
+          scorer.redRec(PHASE, `${id}: challenge amount`, '0 < amount < 1000000 micro-USDC',
+            parsed.decoded.amount, amountOk,
+            amountOk ? 'in range' : 'CRITICAL: suspicious/malformed amount in challenge');
 
           const chainId = parsed.decoded.methodDetails?.chainId;
-          if (chainId !== undefined && Number(chainId) !== 4217) {
-            scorer.addRec('SECURITY',
-              `${PHASE} mpp-${id}: unexpected chainId`,
-              `expected=4217 got=${chainId} — verify challenge targets Tempo mainnet`);
-          }
+          const chainIdOk = chainId === undefined || Number(chainId) === EXPECTED_CHAIN_ID;
+          scorer.redRec(PHASE, `${id}: challenge chainId`, chainId === undefined ? 'n/a' : EXPECTED_CHAIN_ID,
+            chainId === undefined ? 'n/a' : chainId, chainIdOk,
+            chainIdOk ? 'targets Tempo mainnet' : 'CRITICAL: challenge targets the wrong chain');
         }
       } else {
         scorer.recQ(PHASE, `mpp-${id}`, 'valid-challenge', 'unparseable', false,
