@@ -17,6 +17,10 @@
  *   - a signature that stops failing is dropped from the ledger (resolved).
  *
  * Usage: node scripts/verdict-runner.js <path-to-dual-rail-report.json>
+ *        node scripts/verdict-runner.js --set-owner "<phase>|<name>" "<owner text>"
+ *          (manual annotation — a ledger entry with no owner just says so,
+ *          nothing enforces setting one; this is for a human to record who's
+ *          on a standing red once someone actually is)
  * Exit code 0  = no alert needed (prints a short summary to stdout).
  * Exit code 1  = alert needed (prints the ready-to-send message to stdout;
  *                run-daily.sh pipes this straight into notify-telegram.sh
@@ -45,6 +49,24 @@ function saveLedger(ledger) {
 }
 
 function main() {
+  if (process.argv[2] === '--set-owner') {
+    const [, , , sig, ...ownerParts] = process.argv;
+    const owner = ownerParts.join(' ');
+    if (!sig || !owner) {
+      console.error('usage: verdict-runner.js --set-owner "<phase>|<name>" "<owner text>"');
+      process.exit(2);
+    }
+    const ledger = loadLedger();
+    if (!ledger[sig]) {
+      console.error(`no ledger entry for "${sig}" — nothing to annotate (list current entries with no args pending, or check reports/standing-reds.json)`);
+      process.exit(1);
+    }
+    ledger[sig].owner = owner;
+    saveLedger(ledger);
+    console.log(`owner set: ${sig} -> ${owner}`);
+    process.exit(0);
+  }
+
   const reportPath = process.argv[2];
   if (!reportPath) {
     console.error('usage: verdict-runner.js <report.json>');
@@ -101,8 +123,11 @@ function main() {
     for (const { sig, f } of fresh) lines.push(`  - ${sig}: exp ${f.expected}, got ${f.got}`);
   }
   if (escalated.length > 0) {
-    lines.push(`Standing red >= ${ESCALATE_AFTER_DAYS} days (${escalated.length}) — fix prod or retire the probe:`);
-    for (const { sig, age, firstSeen } of escalated) lines.push(`  - ${sig}: red since ${firstSeen} (${age}d)`);
+    lines.push(`Standing red >= ${ESCALATE_AFTER_DAYS} days (${escalated.length}) — fix prod, retire the probe, or name an owner:`);
+    for (const { sig, age, firstSeen } of escalated) {
+      const entry = ledger[sig] || {};
+      lines.push(`  - ${sig}: red since ${firstSeen} (${age}d) — owner: ${entry.owner || 'UNASSIGNED'}`);
+    }
   }
   if (resolved.length > 0) {
     lines.push(`Resolved since last run (${resolved.length}): ${resolved.join(', ')}`);
