@@ -10,15 +10,12 @@ const { getBody } = require('../utils/assert');
 const PHASE = 'P2';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
 
-// Source of truth for the challenge-field RED assertions above. Exported so
-// the mutation control (scripts/test-p2-mutation.js) can flip
-// EXPECTED_RECIPIENT to a wrong value and assert the run goes RED, then
-// restore it and assert green — proving the assertion is actually wired,
-// not just present.
-// Overridable via env — this is what the mutation control
-// (scripts/test-p2-mutation.js) flips to a wrong address to prove the RED
-// assertion above is actually wired: real environments never set this, so
-// the override is a no-op everywhere except that one script.
+// Source of truth for the challenge-field RED assertions below.
+// EXPECTED_RECIPIENT is overridable via env — the mutation control
+// (scripts/test-p2-mutation.js) flips it to a wrong address to prove the
+// RED assertion is actually wired to the verdict, then restores it and
+// checks green. Real environments never set this var, so it is a no-op
+// everywhere except that one script.
 const EXPECTED_RECIPIENT = process.env.MPP_EXPECTED_RECIPIENT_TEST_OVERRIDE
   || '0x9E29FF84B0f3EDa9756262d2F950C435495BA8cC';
 const EXPECTED_CHAIN_ID = 4217;
@@ -98,11 +95,33 @@ module.exports = async function phase2(scorer, config, context) {
             recipient || '(none)', recipientOk,
             recipientOk ? 'matches operator wallet' : 'CRITICAL: server advertised a DIFFERENT recipient before any payment');
 
+          // Cross-check against the tool's OWN catalog-declared price,
+          // not an arbitrary absolute ceiling. Found live on the first
+          // full run after making this RED: a flat "<1000000 micro-USDC
+          // (<$1)" cap false-positived on aipush.setup_website ($1.00
+          // exactly) and aipush.market_report ($29.99) — both real,
+          // legitimately priced tools, not a malformed challenge. The
+          // actual security-relevant invariant is "does the challenge
+          // amount match what the catalog advertises", which is a
+          // stronger check anyway (catches a tool silently overcharging
+          // relative to its own listed price, not just an absolute
+          // outlier). $0.0001 tolerance for rounding.
           const amount = Number(parsed.decoded.amount);
-          const amountOk = !isNaN(amount) && amount > 0 && amount < 1000000;
-          scorer.redRec(PHASE, `${id}: challenge amount`, '0 < amount < 1000000 micro-USDC',
+          const priceUsd = parseFloat(tool.pricing?.price_usd ?? tool.price_usd ?? 'NaN');
+          let amountOk, expDesc;
+          if (!isNaN(priceUsd)) {
+            const expectedMicroUsd = Math.round(priceUsd * 1e6);
+            amountOk = !isNaN(amount) && Math.abs(amount - expectedMicroUsd) <= 100;
+            expDesc = `${expectedMicroUsd} micro-USDC (catalog price $${priceUsd})`;
+          } else {
+            // No catalog price to compare against — fall back to a sane
+            // absolute bound (0 < amount < $1000) rather than no check.
+            amountOk = !isNaN(amount) && amount > 0 && amount < 1000000000;
+            expDesc = '0 < amount < 1000000000 micro-USDC (no catalog price to cross-check)';
+          }
+          scorer.redRec(PHASE, `${id}: challenge amount`, expDesc,
             parsed.decoded.amount, amountOk,
-            amountOk ? 'in range' : 'CRITICAL: suspicious/malformed amount in challenge');
+            amountOk ? 'matches catalog price' : 'CRITICAL: challenge amount does not match the catalog-advertised price');
 
           const chainId = parsed.decoded.methodDetails?.chainId;
           const chainIdOk = chainId === undefined || Number(chainId) === EXPECTED_CHAIN_ID;
