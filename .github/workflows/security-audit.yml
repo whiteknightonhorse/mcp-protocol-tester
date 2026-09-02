@@ -165,23 +165,28 @@ jobs:
           fi
 
           # Check for child_process/exec (exclude regex.exec which is safe).
-          # Two files are a reviewed, named exception (Э4/Э5, Fable's audit
-          # 2026-09-02) — not a blanket carve-out, just these two:
-          #   - scripts/internal-truth.js: execSync("crontab -l"/"cat /etc/cron.d/*"/
-          #     "systemctl list-timers"/"docker ps"/"git rev-parse") — all fixed,
-          #     hardcoded command strings with zero attacker-controlled
-          #     interpolation, read-only local system introspection, never
-          #     touches data from the remote server under test.
-          #   - scripts/test-verdict-fixtures.js: execFile('node', [...]) with a
-          #     static argv array (not a shell string) to spawn the tester
-          #     itself for the CI self-test.
-          # Both live in scripts/ (operator/CI tooling) not src/ (the phases
-          # that process untrusted responses FROM the server under test) —
-          # that boundary is the actual reason this is safe, not just "we
-          # need it". A NEW child_process use anywhere else still fails this
-          # gate, as it should.
+          # Three files/uses are a reviewed, named exception — not a blanket
+          # carve-out, just these:
+          #   - scripts/internal-truth.js (Э5, 2026-09-02): execSync of fixed,
+          #     hardcoded read-only system-introspection commands, zero
+          #     attacker-controlled interpolation, never touches data from
+          #     the remote server under test.
+          #   - scripts/test-verdict-fixtures.js (Э1, 2026-09-02):
+          #     execFile('node', [...]) with a static argv array to spawn the
+          #     tester itself for the CI self-test.
+          #   - src/lib/http.js's curlRequest()/diffTransportProbe() (Fable's
+          #     follow-up audit, 2026-09-02): execFile('curl', [...]) with a
+          #     static argv array, used ONLY by the 4 named hostile-framing
+          #     probes (07-security.js/09-advanced-security.js/
+          #     18-payment-bypass.js), each with a hardcoded, developer-
+          #     authored header/body payload — never data read back from the
+          #     server under test. This is the one deliberate exception
+          #     inside src/: reviewed because the input reaching execFile's
+          #     argv is always our own fixed test payload, not a server
+          #     response. A NEW child_process use anywhere else (src/ or
+          #     scripts/) still fails this gate, as it should.
           if grep -rn "child_process\|require.*child\|\.execSync(" --include="*.js" --exclude-dir=node_modules . | \
-            grep -v "scripts/internal-truth\.js\|scripts/test-verdict-fixtures\.js"; then
+            grep -v "scripts/internal-truth\.js\|scripts/test-verdict-fixtures\.js\|src/lib/http\.js"; then
             echo "::error::Found child_process usage — potential command injection!"
             SUSPICIOUS=$((SUSPICIOUS + 1))
           fi
