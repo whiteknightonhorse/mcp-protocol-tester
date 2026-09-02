@@ -55,10 +55,17 @@ fi
 # this exact log file.
 export TESTER_RUN_ID="daily-${TIMESTAMP}"
 echo "[${TIMESTAMP}] Starting daily MCP protocol test (run id ${TESTER_RUN_ID})..." >> "$LOG"
+RUN_START_MARKER=$(mktemp)
 timeout 600 node --max-old-space-size=512 src/index.js >> "$LOG" 2>&1
 TEST_EXIT=$?
 
-JSON_REPORT=$(ls -t reports/dual-rail-report-*.json 2>/dev/null | head -1)
+# A killed/crashed run (kill -9, OOM, timeout) must NOT be masked by a
+# report file from a PREVIOUS, unrelated run — `ls -t` alone would happily
+# hand back yesterday's report and this whole branch would silently score
+# stale data as if it were today's. Only a report written strictly after
+# this run started counts.
+JSON_REPORT=$(find reports -maxdepth 1 -name 'dual-rail-report-*.json' -newer "$RUN_START_MARKER" 2>/dev/null | sort | tail -1)
+rm -f "$RUN_START_MARKER"
 
 if [ -z "$JSON_REPORT" ]; then
   notify "[apibase tester] 🔴 run-daily.sh: the test run produced NO report at all (node exit ${TEST_EXIT}) — it crashed or was killed mid-run. See cron.log on the box."
