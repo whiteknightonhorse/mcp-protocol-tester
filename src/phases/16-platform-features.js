@@ -378,22 +378,38 @@ module.exports = async function phase16(scorer, config, context) {
   // (2026-09-02) found this had drifted to a fuzzy ">=5 of 6 is fine"
   // threshold with the total hardcoded as the literal string '6/6' in three
   // places — if PLATFORM_TOOLS ever grows/shrinks the literal wouldn't
-  // follow, and a genuinely missing tool would still show green. Now: exact
-  // match required, and the denominator always reflects this map's own size.
+  // follow, and a genuinely missing tool would still show green.
+  //
+  // Second bug found LIVE the first time this ran with the exact-match fix:
+  // checking `context.catalog` (from P0's `?limit=1000` fetch) is blind to
+  // MAX_TOOLS truncation — production runs with MAX_TOOLS=300 (confirmed:
+  // .env has it set), and the 3 platform.* tools simply don't fall within
+  // whichever 300 tools the API happens to return first (confirmed live:
+  // ?limit=300 omits all 3; a per-tool GET does not). Fixed by looking each
+  // tool up directly via GET /api/v1/tools/<id> — correct regardless of
+  // catalog pagination/truncation, and gives real price/schema data too.
   const N = Object.keys(PLATFORM_TOOLS).length;
-  const catalogIds = context.catalog.map(t => t.id || t.name);
   const expectedIds = Object.keys(PLATFORM_TOOLS);
+  const platformToolData = {};
   let catalogHits = 0;
   for (const id of expectedIds) {
-    if (catalogIds.includes(id)) catalogHits++;
+    try {
+      const r = await sf(`${config.apiUrl}/tools/${id}`);
+      if (r.status === 200) {
+        catalogHits++;
+        try { platformToolData[id] = await r.json(); } catch { await drain(r); }
+      } else {
+        await drain(r);
+      }
+    } catch { /* leaves this id absent from platformToolData */ }
   }
   scorer.rec(PHASE, '16.21 new tools in catalog', `${N}/${N}`, `${catalogHits}/${N}`,
-    catalogHits === N, expectedIds.filter(id => !catalogIds.includes(id)).join(', ') || 'all found');
+    catalogHits === N, expectedIds.filter(id => !platformToolData[id]).join(', ') || 'all found');
 
   // Check each has price_usd = 0
   let freeCount = 0;
   for (const id of expectedIds) {
-    const tool = context.catalog.find(t => (t.id || t.name) === id);
+    const tool = platformToolData[id];
     if (tool) {
       const price = parseFloat(tool.pricing?.price_usd ?? tool.price_usd ?? '1');
       if (price === 0) freeCount++;
@@ -405,7 +421,7 @@ module.exports = async function phase16(scorer, config, context) {
   // Check schemas non-empty
   let schemaCount = 0;
   for (const id of expectedIds) {
-    const tool = context.catalog.find(t => (t.id || t.name) === id);
+    const tool = platformToolData[id];
     if (tool?.input_schema?.properties && Object.keys(tool.input_schema.properties).length > 0) {
       schemaCount++;
     }
@@ -414,7 +430,9 @@ module.exports = async function phase16(scorer, config, context) {
     schemaCount === N);
 
   // Check call_batch has maxItems: 20
-  const batchTool = context.catalog.find(t => (t.id || t.name) === 'platform.call_batch');
+  // Same MAX_TOOLS-truncation fix as above — reuse the direct per-tool
+  // lookup rather than re-querying the possibly-truncated catalog array.
+  const batchTool = platformToolData['platform.call_batch'];
   const hasMaxItems = batchTool?.input_schema?.properties?.calls?.maxItems === 20
     || JSON.stringify(batchTool?.input_schema || '').includes('20');
   scorer.rec(PHASE, '16.21d batch maxItems=20', 'in schema', hasMaxItems ? 'yes' : 'no',
