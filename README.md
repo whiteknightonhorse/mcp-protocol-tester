@@ -112,8 +112,31 @@ CONCURRENCY=10 npm test
 | P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x, cross-rail nonce, cross-chain replay, WebSocket upgrade bypass, burst 50 unpaid, chunked encoding bypass, nonce entropy | ~$0.01 |
 | P18   | CDP Facilitator    | PayAI health + Base mainnet + Bazaar extension, CDP auth-gated, 402 wallet/network/asset/version consistency across tools, MPP dual-rail header, health/catalog/free/paid architecture checks, facilitator TLS, wallet constant | $0 |
 | P19   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
+| P20   | Moderation E2E     | Real trigger content through a real paid call (sacrificial key only), asserts blocked + settle-on-block holds after 90s | ~$0.001 |
+| P21   | Appeals            | /appeals/:id + /api/v1/appeals/:id path-param fuzz (5 hostile values x 2 routes), immediate liveness check after each | $0 |
+| P22   | Balance Rail       | Plain-Bearer call (no x402/MPP header) against a priced tool must pay from balance; balance must actually decrease (sacrificial key only) | varies |
+| P23   | Devices            | device.list/state/command + safety-gate rejection of an out-of-bounds command (sacrificial key only) | $0 |
+| P24   | Docs/Catalog Truth | Every static page's `tools/<id>/call` references cross-checked against the live catalog; homepage tool-count drift | $0 |
+| P25   | Time Promises      | Plants a real expiring moderation record, verifies it's actually gone after the real 14-day retention window (sacrificial key only) | ~$0.001 |
+| P26   | Coverage Parity    | Live nginx.conf's declared public locations vs this suite's own probed-route inventory | $0 |
 
-**Total estimated cost:** ~$0.07 per full run.
+⚠️ **Note found in passing while adding P20-P26 (not fixed — out of this
+pass's scope):** this table's OWN numbering for P15-P18 above does not match
+the actual code (`src/phases/16-platform-features.js` is really `P16` in
+`src/index.js`/`src/lib/reporter.js`'s `WEIGHTS`, not the `P15` this table
+shows — the same one-off shift that `reporter.js`'s old labels array had,
+fixed there in the Э1 pass but not re-derived here). Treat `src/index.js`'s
+`config.phaseEnabled(N)` calls and `WEIGHTS` in `src/lib/reporter.js` as the
+actual source of truth for phase numbers; a full renumbering pass of this
+table is its own task.
+
+P20-P26 (Э3, Fable's audit 2026-09-02) need an operator-provisioned
+sacrificial/test identity (`MODERATION_TEST_API_KEY`, `BALANCE_RAIL_TEST_KEY`,
+`DEVICE_TEST_API_KEY` — see `.env.example`) and SKIP cleanly without one;
+they never fall back to the primary `API_KEY`.
+
+**Total estimated cost:** ~$0.07 per full run (plus a few tenths of a cent
+more once P20/P22/P25 are provisioned).
 
 ## Environment Variables
 

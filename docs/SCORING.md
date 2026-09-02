@@ -1,5 +1,34 @@
 # Scoring Methodology
 
+## Verdict layer (Э1, added 2026-09-02 — read this first)
+
+**Score is a trend metric. VERDICT is what actually gates alerting and CI.**
+A run's VERDICT is FAIL, independent of how high the score is, if any of:
+- a RED-class assertion failed — a real money e2e path, a crash/liveness
+  check, a public 404, or a catalog-sanity precondition (see `redRec()` call
+  sites across the phases, especially P20-P26);
+- a CRITICAL error was recorded (500s, etc.);
+- more than 6 phases were SKIPped (a skip must always state a reason —
+  `scorer.skip(phase, reason)` — but too many of them isn't a trustworthy
+  PASS either).
+
+A timeout/dead-server response is a real, distinct, NEVER-passing state —
+see `src/lib/scoring.js` and `src/lib/http.js`'s `-1` sentinel. `run-daily.sh`
+diffs today's failures against a standing-red ledger
+(`scripts/verdict-runner.js`) and escalates anything red for 3+ days.
+
+⚠️ **The phase table and weights below this line predate the verdict layer
+and have drifted from the actual `WEIGHTS` array in `src/lib/reporter.js`
+for a while (there is no P5=15/P6=15/P9="Summary" in the real code) — this
+was found in passing while adding the verdict layer, not fixed here (a full
+rewrite of this doc against the current 27-phase reality is its own task,
+not part of Fable's named findings). Treat `src/lib/reporter.js`'s `WEIGHTS`
+array as the actual source of truth for current weights/phases.
+
+---
+
+# Scoring Methodology
+
 ## Overview
 
 The tester evaluates MCP servers across 10 phases, each with a weighted score. The final grade is computed from the weighted sum.
