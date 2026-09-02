@@ -3,7 +3,7 @@
  * Executes 5 tool calls via MPP auto-flow: 402 -> sign -> retry -> 200.
  * Tracks total USDC spent on Tempo chain.
  */
-const { sf, drain, getDelay } = require('../lib/http');
+const { sf, drain, getDelay, withTesterHeader } = require('../lib/http');
 const { getMppClient } = require('../lib/mpp-client');
 const { getBody } = require('../utils/assert');
 
@@ -62,10 +62,13 @@ module.exports = async function phase5(scorer, config, context) {
         headers['X-API-Key'] = config.apiKey;
       }
 
-      // Use MPP client fetch which handles the 402 -> sign -> retry flow
+      // Use MPP client fetch which handles the 402 -> sign -> retry flow.
+      // mpp.fetch() is the mppx SDK's OWN transport, not our sf() chokepoint —
+      // add the Э6 segmentation header explicitly here so MPP traffic is
+      // tagged too, not just everything routed through sf().
       const r = await mpp.fetch(url, {
         method: 'POST',
-        headers,
+        headers: withTesterHeader(headers),
         body: JSON.stringify(tool.body),
       });
 

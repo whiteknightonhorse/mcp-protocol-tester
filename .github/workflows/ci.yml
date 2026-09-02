@@ -27,13 +27,18 @@ jobs:
 
       - name: Syntax check
         run: |
-          for f in $(find src -name "*.js"); do
+          for f in $(find src -name "*.js") $(find scripts -name "*.js"); do
             node -c "$f" || exit 1
           done
           echo "All files pass syntax check on Node ${{ matrix.node-version }}"
 
-      - name: Dry run (no payments, no server)
-        run: |
-          SKIP_PAYMENTS=true PHASES=0 API_BASE_URL=https://httpbin.org npm test || true
+      # Э1 (Fable's audit, 2026-09-02) — this used to be a dry run against
+      # httpbin.org piped through `|| true`, so nothing here could ever fail
+      # CI no matter what it found. Replaced with the actual verdict
+      # discriminating control the audit requires: a dead server AND a flat
+      # "everything is 200 with an empty body" server must BOTH score
+      # VERDICT=FAIL. No `|| true` — a broken verdict layer now fails CI.
+      - name: Verdict dual-stub control (dead server / flat-200 must both FAIL)
+        run: node scripts/test-verdict-fixtures.js
         env:
           NODE_OPTIONS: --max-old-space-size=512

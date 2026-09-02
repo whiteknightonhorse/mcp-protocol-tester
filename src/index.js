@@ -14,6 +14,7 @@
 
 const config = require('./lib/config');
 const { Scorer } = require('./lib/scoring');
+const { setTesterId } = require('./lib/http');
 const { initX402, getWalletAddress } = require('./lib/x402-client');
 const { initMPP } = require('./lib/mpp-client');
 const { generateReport } = require('./lib/reporter');
@@ -38,6 +39,14 @@ const phase15 = require('./phases/16-platform-features');
 const phase16 = require('./phases/17-agent-experience');
 const phase17 = require('./phases/18-payment-bypass');
 const phase18 = require('./phases/19-cdp-facilitator');
+// Э3 (Fable's audit 2026-09-02) — coverage-parity phases.
+const phase20 = require('./phases/20-moderation-settle');
+const phase21 = require('./phases/21-appeals');
+const phase22 = require('./phases/22-balance-rail');
+const phase23 = require('./phases/23-devices');
+const phase24 = require('./phases/24-docs-truth');
+const phase25 = require('./phases/25-time-promises');
+const phase26 = require('./phases/26-coverage-parity');
 const phaseReport = require('./phases/15-report');
 
 async function main() {
@@ -61,8 +70,14 @@ async function main() {
   const walletReady = !!config.privateKey;
   console.log(`  Wallet: ${walletReady ? 'configured' : 'NOT SET'}`);
   console.log(`  Budget: $${config.maxBudget}/protocol | Skip payments: ${config.skipPayments}`);
+  console.log(`  Tester ID (X-APIbase-Tester): ${config.testerRunId}`);
   if (config.phases) console.log(`  Phases: ${[...config.phases].join(',')}`);
   console.log(`${'='.repeat(76)}\n`);
+
+  // Э6 — every outbound request carries this so prod observability can
+  // segment tester traffic; deliberately NOT a bypass allow-list (bans,
+  // moderation, rate limits must all still apply to the tester).
+  setTesterId(config.testerRunId);
 
   // Init payment clients
   const x402ok = config.privateKey ? initX402(config.privateKey) : false;
@@ -98,6 +113,13 @@ async function main() {
     await new Promise(r => setTimeout(r, 15000));
     await phase18(scorer, config, context);
   }
+  if (config.phaseEnabled(20)) await phase20(scorer, config, context);
+  if (config.phaseEnabled(21)) await phase21(scorer, config, context);
+  if (config.phaseEnabled(22)) await phase22(scorer, config, context);
+  if (config.phaseEnabled(23)) await phase23(scorer, config, context);
+  if (config.phaseEnabled(24)) await phase24(scorer, config, context);
+  if (config.phaseEnabled(25)) await phase25(scorer, config, context);
+  if (config.phaseEnabled(26)) await phase26(scorer, config, context);
 
   // Report: Always generate
   const totalTime = Math.round((Date.now() - t0) / 1000);
@@ -109,9 +131,13 @@ async function main() {
     totalTime,
   };
   await phaseReport(scorer, config, { ...context, ...meta });
-  generateReport(scorer, meta);
+  const { verdict } = generateReport(scorer, meta);
 
   console.log(`\nTotal: ${totalTime}s | x402: $${context.spentX402.toFixed(4)} | MPP: $${context.spentMPP.toFixed(4)}`);
+
+  // Э1 — the process exit code reflects the VERDICT, not just "didn't crash".
+  // run-daily.sh no longer has to re-derive this from grepping the log.
+  process.exitCode = verdict === 'FAIL' ? 1 : 0;
 }
 
 main().catch((e) => {
