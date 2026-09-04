@@ -84,7 +84,18 @@ if [ -n "$EXPIRY_DAYS" ]; then
 fi
 
 echo "=== 7. Dead-man switch: deep-tier report younger than 26h ==="
-HEARTBEAT=$(curl -sS --max-time 15 \
+# T-713: raw.githubusercontent.com is not rewritten by `insteadOf` (that only targets
+# https://github.com/), so this was a plain anonymous GET against the shared-IP anonymous
+# budget — found by github-auth-audit.sh (~/FLEET-LOCKS-AND-AUTH-2026-09-03.md §3). smoke.yml
+# now passes the workflow's own auto-issued GITHUB_TOKEN to this step's env; when present it
+# rides along as a real Authorization header instead of the comment at the top of this file
+# just claiming one exists. No token in env (e.g. a manual local run) still degrades to
+# anonymous rather than failing the check outright.
+AUTH_HEADER=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH_HEADER=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+fi
+HEARTBEAT=$(curl -sS --max-time 15 "${AUTH_HEADER[@]}" \
   "https://raw.githubusercontent.com/whiteknightonhorse/mcp-protocol-tester/main/reports/.heartbeat")
 HB_TS=$(echo "$HEARTBEAT" | head -1)
 if [ -z "$HB_TS" ] || [[ "$HB_TS" == "404:"* ]]; then

@@ -24,6 +24,12 @@ jobs:
       - name: Run outer smoke checks
         id: smoke
         run: bash scripts/smoke-external.sh
+        env:
+          # T-713: previously the comment above claimed this token "is" available to the
+          # script; it never was — a plain `run:` step does not inherit GITHUB_TOKEN unless
+          # given it explicitly. Passing it here lets step 7's raw.githubusercontent.com read
+          # send a real Authorization header instead of hitting the shared anonymous-IP budget.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Find existing open smoke-failure issue
