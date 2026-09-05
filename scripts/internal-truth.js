@@ -64,7 +64,19 @@ function findings() {
   const tableRows = [...runbookText.matchAll(/^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*[^|]+?\s*\|\s*$/gm)]
     .filter(([, jobName]) => jobName.trim() !== 'Job'); // skip the header row itself
 
-  const crontabText = [sh('crontab -l 2>/dev/null'), sh('cat /etc/cron.d/* 2>/dev/null')].join('\n').toLowerCase();
+  // Host cron rows are checked against `crontab -l` ONLY, not /etc/cron.d/* —
+  // this box has a rudimentary /etc/cron.d/certbot left over from the distro
+  // package (self-disabling under systemd per its own comment: "This cronjob
+  // will NOT be executed if you are running systemd as your init system").
+  // Folding /etc/cron.d/* into this text let the word "certbot" match it, so
+  // a mutation reverting the Certbot Renewal row's Owner back to "Host cron"
+  // (the original Д5 shape) passed check 2 silently — the file exists, but
+  // doesn't run the job, and the runbook itself says Host cron means "the
+  // apibase user's crontab" (§8), not "anything under /etc/cron.d". Any row
+  // that legitimately needs /etc/cron.d/* should be declared as its own
+  // mechanism (e.g. "systemd timer") the same way Certbot now is, not folded
+  // into this keyword blob.
+  const crontabText = sh('crontab -l 2>/dev/null').toLowerCase();
   const timersText = sh('systemctl list-timers --all 2>/dev/null');
 
   for (const [, jobName, schedule, owner] of tableRows) {
@@ -89,10 +101,10 @@ function findings() {
       // accurate row wrongly report as missing.
       const keyword = jobName.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/\s+/)[0];
       if (crontabText.includes(keyword)) {
-        ok.push(`"${jobName}" (declared: ${schedule}) — found a matching crontab/etc-cron.d entry`);
+        ok.push(`"${jobName}" (declared: ${schedule}) — found a matching \`crontab -l\` entry`);
       } else {
-        problems.push(`"${jobName}" is declared as Host cron (${schedule}) in runbook.md but no crontab or ` +
-          `/etc/cron.d/* entry on this box mentions "${keyword}" — the job may not be running at all`);
+        problems.push(`"${jobName}" is declared as Host cron (${schedule}) in runbook.md but no \`crontab -l\` ` +
+          `entry on this box mentions "${keyword}" — the job may not be running at all`);
       }
     }
   }
