@@ -36,6 +36,14 @@ const PROBED_PREFIXES = [
   // These 4 carry real logic/money/machine-contract meaning — real
   // assertions below (26.2), not just an allow-list entry.
   '/api', '/api/v1', '/onboard', '/openapi.json',
+  // T-08 (2026-09-05): the operator who ships a new public nginx location
+  // owns its probe too — 26.1 caught these two red for 3 days after they
+  // went live (content-machine's /guides/ and T-02's /autopilot/incident),
+  // named by prefix, with no other phase in this corpus sending them a
+  // request. Neither carries money/logic/machine-contract meaning (both are
+  // human-facing HTML), so tier 2 — real liveness assertions in 26.3 below,
+  // same discipline as robots.txt et al, not a bare allow-list entry.
+  '/guides/', '/autopilot/incident',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every
@@ -151,7 +159,8 @@ module.exports = async function phase26(scorer, config, context) {
   // 200 + a real content-type + non-empty body; content truth-checking
   // (matching ai.txt/llms.txt claims against the live catalog) is
   // deliberately NOT here — if the operator wants that, it moves to P24.
-  const livenessRoutes = ['/robots.txt', '/ai.txt', '/llms.txt', '/sitemap.xml', '/video/'];
+  const livenessRoutes = ['/robots.txt', '/ai.txt', '/llms.txt', '/sitemap.xml', '/video/',
+    '/guides/', '/autopilot/incident'];
   for (const path of livenessRoutes) {
     try {
       const r = await sf(`${config.apiBaseUrl}${path}`);
