@@ -16,6 +16,12 @@ const PAYMENT_TOOLS = [
   { id: 'nasa.apod', body: {} },
   { id: 'books.search', body: { query: 'dune' } },
   { id: 'anime.search', body: { query: 'naruto' } },
+  // T-0111 (2026-09-10): control for anime.search — same jikan provider,
+  // id-lookup endpoint (mirrors provider-limits.json's own jikan health_url,
+  // verified separately as reliable while anime.search was standing-red).
+  // Lets a future red distinguish "this method" from "this provider" instead
+  // of the tester silently having zero paid signal on jikan's other tools.
+  { id: 'anime.details', body: { id: 1 } },
 ];
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
