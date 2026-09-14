@@ -117,6 +117,18 @@ Full log: reports/daily-${TIMESTAMP}.log on the tester box.
   fi
 fi
 
+# --- T-0127: free direct jikan re-check (external-blocker annotation) -------
+# Independent of the paid ledger above and of $JSON_REPORT/$TEST_EXIT — always
+# runs. Costs $0 (direct api.jikan.moe call, never our own x402/mpp gateway).
+# Refreshes the owner/recheck annotation on anime.search's standing-red ledger
+# entries so the external-blocker fact (jikan-me/jikan-rest#612) has a place
+# to go stale instead of sitting there UNASSIGNED forever. reports/*.json is
+# gitignored (local box state, same as standing-reds.json itself) — nothing
+# to commit here, unlike the heartbeat below. See scripts/jikan-recheck.js
+# for the full rationale.
+node scripts/jikan-recheck.js >> "$LOG" 2>&1 \
+  || echo "[$(date +%Y%m%d_%H%M%S)] jikan-recheck.js failed (non-fatal)" >> "$LOG"
+
 # --- Э5: internal truth (Ярус C) --------------------------------------------
 # White-box, same box: crontab/systemd vs apibase's own documented job table,
 # and the served-pair (git HEAD vs running image / static-current symlink).
