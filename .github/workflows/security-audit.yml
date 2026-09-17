@@ -187,10 +187,21 @@ jobs:
           #   - scripts/test-p2-mutation.js (same audit): execFile('node',
           #     [...]) with a static argv array, same shape as
           #     test-verdict-fixtures.js — spawns the tester itself.
+          #   - scripts/jikan-recheck.js (T-0133, 2026-09-17, added after the
+          #     T-0127 file that introduced it on 2026-09-14 missed this
+          #     list): execFileSync('node', [VERDICT_RUNNER, '--set-owner',
+          #     sig, ownerText], {...}) — argv[0]/[1] are the fixed 'node'
+          #     literal and a hardcoded path to scripts/verdict-runner.js;
+          #     `sig` comes from a local SIGS constant, not runtime input;
+          #     `ownerText` is built from the ISSUE_REF constant, today's
+          #     date, and static template text. The one thing this script
+          #     fetches over the network (api.jikan.moe's HTTP status) only
+          #     feeds a ternary that picks which static template to use — the
+          #     server's response body/headers never reach argv.
           # A NEW child_process use anywhere else (src/ or scripts/) still
           # fails this gate, as it should.
           if grep -rn "child_process\|require.*child\|\.execSync(" --include="*.js" --exclude-dir=node_modules . | \
-            grep -v "scripts/internal-truth\.js\|scripts/test-verdict-fixtures\.js\|src/lib/http\.js\|scripts/test-p2-mutation\.js"; then
+            grep -v "scripts/internal-truth\.js\|scripts/test-verdict-fixtures\.js\|src/lib/http\.js\|scripts/test-p2-mutation\.js\|scripts/jikan-recheck\.js"; then
             echo "::error::Found child_process usage — potential command injection!"
             SUSPICIOUS=$((SUSPICIOUS + 1))
           fi
