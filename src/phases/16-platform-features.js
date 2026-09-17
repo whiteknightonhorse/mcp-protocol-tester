@@ -9,6 +9,74 @@ const { mcpRequest } = require('../lib/mcp-client');
 const PHASE = 'P16';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// T-0135: apibase's `buildToolQuality()` (Q-1/T-2 contract, see
+// src/services/tool-quality.service.ts on the server) never fabricates a 0
+// for an unmeasured tool. Below this many calls in the 24h window,
+// success_rate/p50_ms/p95_ms are `null` — a real, legitimate value, not a
+// missing field. 10 is the server's own constant (QUALITY_MIN_CALLS);
+// hardcoded here because it's a documented contract number (Specification
+// §Q-1), not an implementation detail this repo can import.
+const QUALITY_MIN_CALLS = 10;
+
+// `platform.tool_quality` shape validator — `data.tool` is `null` (never
+// measured) or `{window_h, calls, success_rate, p50_ms, p95_ms, as_of}`
+// with success_rate/p50_ms/p95_ms staying `null` below QUALITY_MIN_CALLS.
+// Exported so scripts/test-t0135-mutation.js can feed it a synthetic
+// pre-Q-1 flat body (`{tool_id, uptime_pct, error_rate, total_calls,
+// success_calls}`) without needing the server to still speak that shape.
+function evaluateToolQualityShape(data) {
+  if (!data || typeof data.tool_id !== 'string') {
+    return { ok: false, detail: 'missing tool_id' };
+  }
+  if (!('tool' in data)) {
+    return { ok: false, detail: 'response has no `tool` key (pre-Q-1 flat shape?)' };
+  }
+  const tool = data.tool;
+  if (tool === null) {
+    return { ok: true, detail: 'tool=null (no measurement)', tool: null };
+  }
+  if (typeof tool !== 'object') {
+    return { ok: false, detail: `tool is ${typeof tool}, expected object or null` };
+  }
+  if (typeof tool.window_h !== 'number') return { ok: false, detail: 'tool.window_h not a number' };
+  if (typeof tool.calls !== 'number' || tool.calls < 0) return { ok: false, detail: 'tool.calls invalid' };
+  if (typeof tool.as_of !== 'string') return { ok: false, detail: 'tool.as_of not a string' };
+  const enoughSample = tool.calls >= QUALITY_MIN_CALLS;
+  if (enoughSample) {
+    if (typeof tool.success_rate !== 'number' || tool.success_rate < 0 || tool.success_rate > 100) {
+      return { ok: false, detail: `success_rate out of range at calls=${tool.calls}: ${tool.success_rate}` };
+    }
+  } else if (tool.success_rate !== null) {
+    return { ok: false, detail: `success_rate should be null below ${QUALITY_MIN_CALLS} calls (calls=${tool.calls}), got ${tool.success_rate}` };
+  }
+  if (tool.p50_ms !== null && typeof tool.p50_ms !== 'number') return { ok: false, detail: 'tool.p50_ms not null/number' };
+  if (tool.p95_ms !== null && typeof tool.p95_ms !== 'number') return { ok: false, detail: 'tool.p95_ms not null/number' };
+  return { ok: true, detail: `calls=${tool.calls} success_rate=${tool.success_rate}`, tool };
+}
+
+// `platform.tool_rankings` shape validator — every entry present implies a
+// real sample (server-side filter skips tools with success_rate===null), so
+// total_calls < QUALITY_MIN_CALLS on a present entry means the pre-T-2
+// fabricated-zero bug is back. An empty/short array is legitimate: most
+// tools have no 24h traffic (Q-1 measured Redis slice: 2/1384 sampled).
+function evaluateRankings(rd, limit) {
+  if (!Array.isArray(rd)) return { ok: false, detail: 'not an array' };
+  if (rd.length > limit) return { ok: false, detail: `len=${rd.length} exceeds limit=${limit}` };
+  for (const item of rd) {
+    if (typeof item.tool_id !== 'string') return { ok: false, detail: `entry missing tool_id: ${JSON.stringify(item)}` };
+    if (typeof item.uptime_pct !== 'number' || item.uptime_pct < 0 || item.uptime_pct > 100) {
+      return { ok: false, detail: `bad uptime_pct on ${item.tool_id}` };
+    }
+    if (typeof item.error_rate !== 'number' || item.error_rate < 0 || item.error_rate > 100) {
+      return { ok: false, detail: `bad error_rate on ${item.tool_id}` };
+    }
+    if (typeof item.total_calls !== 'number' || item.total_calls < QUALITY_MIN_CALLS) {
+      return { ok: false, detail: `fabricated/low-sample entry ${item.tool_id}: total_calls=${item.total_calls}` };
+    }
+  }
+  return { ok: true, detail: `len=${rd.length}, all entries sampled (>=${QUALITY_MIN_CALLS} calls)` };
+}
+
 // New tool IDs (REST) and their MCP names
 const PLATFORM_TOOLS = {
   'account.usage':       'account.analytics.usage',
@@ -141,38 +209,43 @@ module.exports = async function phase16(scorer, config, context) {
   // ══════════════════════════════════════════════════════════════
   console.log('\n  --- F5: Tool Quality Index ---\n');
 
-  // 16.7 platform.tool_quality returns quality data
+  // 16.7 platform.tool_quality returns quality data (T-0135: Q-1/T-2 shape —
+  // `tool` is `null` or a sampled object; null is a legitimate value, not a
+  // failure).
   const qualRes = await callTool('platform.tool_quality', { tool_id: 'crypto.get_price' });
   const qualBody = await parseJson(qualRes);
   const qd = qualBody?.data;
-  const qualValid = qd
-    && typeof qd.tool_id === 'string'
-    && typeof qd.uptime_pct === 'number' && qd.uptime_pct >= 0 && qd.uptime_pct <= 100
-    && typeof qd.error_rate === 'number' && qd.error_rate >= 0 && qd.error_rate <= 100
-    && typeof qd.total_calls === 'number' && qd.total_calls >= 0
-    && typeof qd.success_calls === 'number';
-  scorer.rec(PHASE, '16.7 tool_quality', 'valid data', qualRes.status,
-    qualRes.status === 200 && qualValid,
-    qd ? `uptime=${qd.uptime_pct}% err=${qd.error_rate}% calls=${qd.total_calls}` : 'missing');
-  // Consistency checks
-  if (qd) {
-    const uptimeErrSum = Math.abs((qd.uptime_pct + qd.error_rate) - 100);
-    scorer.rec(PHASE, '16.7b uptime+error≈100', '<5', uptimeErrSum.toFixed(1),
-      uptimeErrSum < 5 || qd.total_calls === 0, `uptime=${qd.uptime_pct}+err=${qd.error_rate}`);
-    scorer.rec(PHASE, '16.7c success<=total', 'true', qd.success_calls <= qd.total_calls ? 'yes' : 'no',
-      qd.success_calls <= qd.total_calls);
+  const qc = evaluateToolQualityShape(qd);
+  scorer.rec(PHASE, '16.7 tool_quality', 'valid data (tool=null or sampled shape)', qualRes.status,
+    qualRes.status === 200 && qc.ok, qc.detail);
+  // Invariants — only meaningful when there IS a measurement; a null tool
+  // has nothing to check (absence of data is not a failure, T-2).
+  if (qc.ok && qc.tool) {
+    const t = qc.tool;
+    const enoughSample = t.calls >= QUALITY_MIN_CALLS;
+    const rateInRange = !enoughSample || (typeof t.success_rate === 'number' && t.success_rate >= 0 && t.success_rate <= 100);
+    scorer.rec(PHASE, '16.7b success_rate in [0,100] when sampled', '0<=x<=100',
+      enoughSample ? t.success_rate : `n/a (calls<${QUALITY_MIN_CALLS})`, rateInRange, `calls=${t.calls}`);
+
+    const nullBelowThreshold = enoughSample || t.success_rate === null;
+    scorer.rec(PHASE, '16.7c success_rate=null below sample threshold', 'null',
+      enoughSample ? 'n/a (sampled)' : t.success_rate, nullBelowThreshold, `calls=${t.calls} threshold=${QUALITY_MIN_CALLS}`);
+  } else if (qc.ok) {
+    scorer.rec(PHASE, '16.7b success_rate in [0,100] when sampled', 'skip: tool=null', 'skip', true, 'no measurement, nothing to check');
+    scorer.rec(PHASE, '16.7c success_rate=null below sample threshold', 'skip: tool=null', 'skip', true, 'no measurement, nothing to check');
   }
   const qualFree = qualBody?.metadata?.billing_status === 'FREE' || qualBody?.metadata?.cost_usd === 0;
   scorer.rec(PHASE, '16.7d tool_quality is free', 'FREE', qualFree ? 'FREE' : 'PAID', qualFree);
   await sleep(300);
 
-  // 16.8 tool_quality for unknown tool returns zeros
+  // 16.8 tool_quality for an unknown tool_id -> tool=null, never fabricated
+  // zeros (T-2 is specifically about this case).
   const qualUnkRes = await callTool('platform.tool_quality', { tool_id: 'nonexistent.tool_xyz' });
   const qualUnkBody = await parseJson(qualUnkRes);
   const qud = qualUnkBody?.data;
-  scorer.rec(PHASE, '16.8 unknown tool quality', '200 + zeros', qualUnkRes.status,
-    qualUnkRes.status === 200 && qud?.total_calls === 0,
-    qud ? `calls=${qud.total_calls} uptime=${qud.uptime_pct}` : '');
+  scorer.rec(PHASE, '16.8 unknown tool quality', '200 + tool=null', qualUnkRes.status,
+    qualUnkRes.status === 200 && qud && 'tool' in qud && qud.tool === null,
+    qud ? `tool=${JSON.stringify(qud.tool)}` : '');
   await sleep(200);
 
   // 16.9 tool_quality requires tool_id
@@ -182,22 +255,16 @@ module.exports = async function phase16(scorer, config, context) {
   await drain(qualNoIdRes);
   await sleep(200);
 
-  // 16.10 platform.tool_rankings uptime sort
+  // 16.10 platform.tool_rankings uptime sort (T-0135: an empty/short array
+  // is a legitimate "nothing sampled enough yet" result, not a failure —
+  // only a present entry with a fabricated zero is a real defect).
   const rankRes = await callTool('platform.tool_rankings', { sort: 'uptime', limit: 10 });
   const rankBody = await parseJson(rankRes);
   const rd = rankBody?.data;
+  const rankCheck = evaluateRankings(rd, 10);
+  scorer.rec(PHASE, '16.10 tool_rankings uptime', 'array <=10, no fabricated zeros', rankRes.status,
+    rankRes.status === 200 && rankCheck.ok, rankCheck.detail);
   const rankIsArray = Array.isArray(rd);
-  const rankLimited = rankIsArray && rd.length <= 10;
-  let rankFieldsOk = false;
-  if (rankIsArray && rd.length > 0) {
-    const item = rd[0];
-    rankFieldsOk = typeof item.tool_id === 'string'
-      && typeof item.uptime_pct === 'number'
-      && typeof item.error_rate === 'number';
-  }
-  scorer.rec(PHASE, '16.10 tool_rankings uptime', 'sorted <=10', rankRes.status,
-    rankRes.status === 200 && rankIsArray && rankLimited && rankFieldsOk,
-    `len=${rd?.length} fields=${rankFieldsOk}`);
   // Check uptime descending
   let rankSortOk = true;
   if (rankIsArray && rd.length > 1) {
@@ -513,3 +580,10 @@ module.exports = async function phase16(scorer, config, context) {
   const passed = scorer.all.filter(t => t.phase === PHASE && t.ok).length;
   console.log(`\n  Platform features: ${passed}/${total} passed`);
 };
+
+// Exposed for scripts/test-t0135-mutation.js: pure shape validators, no
+// network/scorer dependency, so a synthetic pre-Q-1 body can be checked
+// without a live call.
+module.exports.evaluateToolQualityShape = evaluateToolQualityShape;
+module.exports.evaluateRankings = evaluateRankings;
+module.exports.QUALITY_MIN_CALLS = QUALITY_MIN_CALLS;
