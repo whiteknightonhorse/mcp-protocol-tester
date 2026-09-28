@@ -6,6 +6,7 @@
  */
 const { sf, drain } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
+const { decodePaymentRequiredHeader } = require('@x402/core/http');
 
 const PHASE = 'P17';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -62,18 +63,54 @@ module.exports = async function phase17(scorer, config, context) {
   await drain(noKeyRes);
   await sleep(200);
 
-  // 17.4 401 response contains actionable guidance
-  const unauth = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+  // 17.4 no-credential call has a path forward
+  // T-0224 (taskloop TESTER-reds-0928 ruling-1, §3): a paid tool called with
+  // zero credentials now correctly 402s (T-0223 fixed the priceUsd>0 gate),
+  // not 401 — a $0 challenge would be meaningless since there's nothing to
+  // pay. Green means the agent can actually act on the 402: the
+  // PAYMENT-REQUIRED header decodes to a real x402 v2 challenge with a
+  // non-empty accepts[], and WWW-Authenticate: Payment is present for the
+  // MPP rail too.
+  const noCred = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
   });
-  let unauthBody = null;
-  try { unauthBody = await unauth.json(); } catch { await drain(unauth); }
-  const unauthMsg = JSON.stringify(unauthBody || '').toLowerCase();
-  const hasGuidance = unauthMsg.includes('register') || unauthMsg.includes('key') ||
-    unauthMsg.includes('authorization') || unauthMsg.includes('bearer');
-  scorer.rec(PHASE, '17.4 401 has guidance', 'how to auth', hasGuidance ? 'yes' : 'bare 401',
-    unauth.status === 401 && hasGuidance,
-    hasGuidance ? 'agent knows what to do' : 'agent stuck — add registration URL to 401 body');
+  await drain(noCred);
+  const paymentRequiredHeader = noCred.headers.get('payment-required');
+  const wwwAuth = noCred.headers.get('www-authenticate') || '';
+  let decoded402 = null;
+  if (paymentRequiredHeader) {
+    try { decoded402 = decodePaymentRequiredHeader(paymentRequiredHeader); } catch {}
+  }
+  const hasPathForward = noCred.status === 402 &&
+    !!decoded402 && decoded402.x402Version === 2 &&
+    Array.isArray(decoded402.accepts) && decoded402.accepts.length > 0 &&
+    /^payment\b/i.test(wwwAuth);
+  scorer.rec(PHASE, '17.4 no-credential call has a path forward',
+    '402 + decodable PAYMENT-REQUIRED + WWW-Authenticate: Payment',
+    hasPathForward ? 'yes' : `status=${noCred.status} decodable=${!!decoded402}`,
+    hasPathForward,
+    hasPathForward ? 'agent can decode the challenge and pay via x402 or MPP'
+      : 'agent stuck — 402 challenge not decodable or missing MPP header');
+  await sleep(200);
+
+  // 17.4b invalid API key still gets an actionable 401
+  const junkKey = 'ak_live_' + Array(32).fill(0).map(() =>
+    '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
+  const badKey = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${junkKey}` },
+    body: '{}',
+  });
+  let badKeyBody = null;
+  try { badKeyBody = await badKey.json(); } catch { await drain(badKey); }
+  const badKeyMsg = JSON.stringify(badKeyBody || '').toLowerCase();
+  const badKeyGuidance = badKeyMsg.includes('register') || badKeyMsg.includes('key') ||
+    badKeyMsg.includes('bearer');
+  scorer.rec(PHASE, '17.4b invalid key rejected with guidance', '401 + guidance',
+    badKeyGuidance ? `yes (status=${badKey.status})` : `bare/wrong status=${badKey.status}`,
+    badKey.status === 401 && badKeyGuidance,
+    badKeyGuidance ? 'agent knows the key is bad and how to get a real one'
+      : 'agent stuck — invalid-key response lacks guidance or wrong status');
   await sleep(200);
 
   // ══════════════════════════════════════════════════════════════
