@@ -27,8 +27,13 @@ const { sf, drain } = require('../lib/http');
 
 const PHASE = 'P24';
 
+// T-0222 (2026-09-28, TESTER-reds-0928.ruling-1 §1): /why, /partners and the
+// three *-intent pages carry tool_id examples (tools/x/call) just like
+// /connect did for Д6 — same class, added here rather than a bare P26
+// allow-list entry so a stale reference on any of them is caught for real.
 const STATIC_PAGES = ['/', '/connect', '/frameworks', '/pricing', '/catalog', '/dashboard',
-  '/contact', '/privacy', '/terms', '/policy/moderation'];
+  '/contact', '/privacy', '/terms', '/policy/moderation', '/why', '/partners',
+  '/flight-search-intent', '/image-generation-intent', '/company-research-intent'];
 
 function extractToolRefs(html) {
   const refs = new Set();
@@ -52,7 +57,7 @@ module.exports = async function phase24(scorer, config, context) {
     fixtureStale.length >= 1, fixtureStale.join(', ') || 'detector did not fire on a known-bad fixture');
 
   // 24.1 — real pages, real catalog.
-  let allStale = [];
+  let candidateStale = [];
   for (const page of STATIC_PAGES) {
     let html = '';
     try {
@@ -66,7 +71,27 @@ module.exports = async function phase24(scorer, config, context) {
     const refs = extractToolRefs(html);
     const stale = refs.filter((id) => !catalogIds.has(id));
     if (stale.length > 0) {
-      allStale.push(...stale.map((id) => `${page}:${id}`));
+      candidateStale.push(...stale.map((id) => `${page}:${id}`));
+    }
+  }
+  // T-0222 (2026-09-28, TESTER-reds-0928.ruling-1 §1): adding the
+  // *-intent pages surfaced a pre-existing false positive — `context.catalog`
+  // comes from P0's `?limit=1000` fetch (further sliced to MAX_TOOLS=300 in
+  // prod), and confirmed live that sabre.search_flights/stability.generate
+  // simply don't fall within whichever page the API happens to return, same
+  // truncation-blindness bug already documented in P16's 16.21 (platform
+  // tools) and fixed there the same way: a candidate is only genuinely stale
+  // if a direct per-tool GET also 404s, which is correct regardless of
+  // catalog pagination/truncation.
+  const allStale = [];
+  for (const entry of candidateStale) {
+    const id = entry.slice(entry.indexOf(':') + 1);
+    try {
+      const r = await sf(`${config.apiUrl}/tools/${id}`);
+      await drain(r);
+      if (r.status !== 200) allStale.push(entry);
+    } catch {
+      allStale.push(entry);
     }
   }
   // RED: a doc page telling every new visitor to call a tool that doesn't

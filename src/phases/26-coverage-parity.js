@@ -44,6 +44,14 @@ const PROBED_PREFIXES = [
   // human-facing HTML), so tier 2 — real liveness assertions in 26.3 below,
   // same discipline as robots.txt et al, not a bare allow-list entry.
   '/guides/', '/autopilot/incident',
+  // T-0222 (2026-09-28, TESTER-reds-0928.ruling-1 §1): probed in P24
+  // (STATIC_PAGES — stale tool_id reference check), not here.
+  '/why', '/partners', '/flight-search-intent', '/image-generation-intent',
+  '/company-research-intent',
+  // T-0222: real probes in 26.2 (machine-readable contract docs) and 26.4
+  // (slash-canonical redirects) below — entries here just make the prefix
+  // list honest about what's covered.
+  '/why.md', '/auth.md', '/video', '/guides',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every
@@ -138,19 +146,31 @@ module.exports = async function phase26(scorer, config, context) {
     { path: '/api/v1', expectStatus: [402], expectJson: true },
     { path: '/onboard', expectStatus: [200], expectJson: true },
     { path: '/openapi.json', expectStatus: [200], expectJson: true },
+    // T-0222 (2026-09-28, TESTER-reds-0928.ruling-1 §1): machine-readable
+    // contract docs — isitagentready's authMd check reads /auth.md with
+    // Accept: text/markdown (T-0185c), so a wrong content-type breaks that
+    // integration silently. /auth.md additionally must not LIE about auth:
+    // its body has to name a bearer-style credential AND a payment rail, or
+    // the document is actively misleading a machine reader.
+    { path: '/why.md', expectStatus: [200], expectCt: 'text/markdown' },
+    { path: '/auth.md', expectStatus: [200], expectCt: 'text/markdown',
+      bodyGroups: [['Bearer', 'X-API-Key'], ['x402', 'Payment']] },
   ];
   for (const probe of realProbes) {
     try {
       const r = await sf(`${config.apiBaseUrl}${probe.path}`);
       const statusOk = probe.expectStatus.includes(r.status);
       const ct = r.headers?.get?.('content-type') || '';
-      const jsonOk = !probe.expectJson || ct.includes('json');
-      await drain(r);
-      scorer.rec(PHASE, `26.2 ${probe.path}`, `${probe.expectStatus.join('|')} json`,
-        `${r.status} ${ct.split(';')[0]}`, statusOk && jsonOk,
-        statusOk && jsonOk ? 'ok' : 'unexpected status or content-type for a real-logic/machine-contract route');
+      const ctOk = probe.expectCt ? ct.includes(probe.expectCt) : (!probe.expectJson || ct.includes('json'));
+      const body = await (async () => { try { return await r.text(); } catch { return ''; } })();
+      const bodyOk = !probe.bodyGroups || probe.bodyGroups.every((group) => group.some((s) => body.includes(s)));
+      const ok = statusOk && ctOk && bodyOk;
+      const expectLabel = probe.expectCt ? probe.expectCt : 'json';
+      scorer.rec(PHASE, `26.2 ${probe.path}`, `${probe.expectStatus.join('|')} ${expectLabel}`,
+        `${r.status} ${ct.split(';')[0]}${probe.bodyGroups ? (bodyOk ? ' body-ok' : ' body-missing-terms') : ''}`, ok,
+        ok ? 'ok' : 'unexpected status, content-type, or body content for a real-logic/machine-contract route');
     } catch (e) {
-      scorer.recCatch(PHASE, `26.2 ${probe.path}`, `${probe.expectStatus.join('|')} json`, e);
+      scorer.recCatch(PHASE, `26.2 ${probe.path}`, `${probe.expectStatus.join('|')} ${probe.expectCt || 'json'}`, e);
     }
   }
 
@@ -171,6 +191,36 @@ module.exports = async function phase26(scorer, config, context) {
         `${r.status} ${ct.split(';')[0]} ${body.length}b`, ok);
     } catch (e) {
       scorer.recCatch(PHASE, `26.3 ${path} liveness`, '200 + non-empty', e);
+    }
+  }
+
+  // 26.4 — slash-canonical redirects (T-0222, 2026-09-28,
+  // TESTER-reds-0928.ruling-1 §1). `/video` and `/guides` are bare
+  // `location = /x { return 301 .../x/; }` blocks (directory-backed roots,
+  // canonical WITH the trailing slash) — distinct from the `/video/` and
+  // `/guides/` prefix locations already covered by 26.3 liveness above, and
+  // otherwise invisible to 26.1 since the parser only reads exact/prefix
+  // `location` blocks, not the redirect target. `/pricing/` is one instance
+  // of the OTHER direction (T-0217's `location ~ ^/(...)/$` regex whitelist,
+  // itself skipped by parseNginxLocations() since it only matches non-regex
+  // locations) — static pages are canonical WITHOUT the trailing slash.
+  // Exact match required on both status and Location, not just "is a
+  // redirect": a wrong target silently sends every client somewhere else.
+  const redirectProbes = [
+    { path: '/video', location: 'https://apibase.pro/video/' },
+    { path: '/guides', location: 'https://apibase.pro/guides/' },
+    { path: '/pricing/', location: 'https://apibase.pro/pricing' },
+  ];
+  for (const probe of redirectProbes) {
+    try {
+      const r = await sf(`${config.apiBaseUrl}${probe.path}`, { redirect: 'manual' });
+      const loc = r.headers?.get?.('location') || '';
+      await drain(r);
+      const ok = r.status === 301 && loc === probe.location;
+      scorer.rec(PHASE, `26.4 ${probe.path} slash-canonical redirect`, `301 -> ${probe.location}`,
+        `${r.status} -> ${loc || '(none)'}`, ok);
+    } catch (e) {
+      scorer.recCatch(PHASE, `26.4 ${probe.path} slash-canonical redirect`, `301 -> ${probe.location}`, e);
     }
   }
 
