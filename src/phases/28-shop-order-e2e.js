@@ -5,6 +5,11 @@
  * Covered: quote shape, 402 challenge (amount, payee is not a platform wallet,
  * rails x402 + MPP), replay of the same quote -> same binding, amount mismatch
  * -> 402 and the order stays QUOTED.
+ * Tempo exception (ruling T-0349 q-1): apibase-demo's Tempo payout IS the platform
+ * Tempo wallet by design; the stream pilot key must equal it (docs/integrator.md:94,
+ * src/shop/stream-session.ts:187-219). So for slug apibase-demo only, the MPP
+ * "not the platform wallet" sub-check is SKIPPED; the recipient is still required to be
+ * a well-formed address. Any other slug keeps the full hard check on both rails.
  * SKIPPED (stated in the BLOCKED list): the paid half (pay -> DELIVERED, receipt
  * idempotent on replay). The server has no demo-mode settlement switch; a real
  * pay needs a funded on-chain USDC authorization, which this phase never makes.
@@ -63,8 +68,15 @@ module.exports = async function phase28(scorer, config) {
     scorer.rec(PHASE, '28.2 MPP challenge (Tempo)', 'WWW-Authenticate: Payment method=tempo, amount 5000000',
       `${mpp1?.method} ${mpp1?.request?.amount}`, mpp1?.method === 'tempo' && mpp1?.request?.amount === PRICE_MICRO);
     const recipient = String(mpp1?.request?.recipient || '');
-    scorer.rec(PHASE, '28.2 MPP recipient is the merchant payout, not the platform Tempo wallet', `!= ${shop.PLATFORM_TEMPO}`,
-      recipient || '(none)', !!recipient && recipient.toLowerCase() !== shop.PLATFORM_TEMPO.toLowerCase());
+    const wellFormed = /^0x[0-9a-fA-F]{40}$/.test(recipient);
+    if (shop.SLUG === 'apibase-demo') {
+      scorer.rec(PHASE, '28.2 MPP recipient is a well-formed address', '0x + 40 hex', recipient || '(none)', wellFormed);
+      scorer.blocked(PHASE, '28.2 MPP recipient is not the platform Tempo wallet', 'SKIPPED',
+        'apibase-demo Tempo payout is the operator wallet by design, stream pilot requires it (docs/integrator.md:94, src/shop/stream-session.ts:187-219)');
+    } else {
+      scorer.rec(PHASE, '28.2 MPP recipient is the merchant payout, not the platform Tempo wallet', `!= ${shop.PLATFORM_TEMPO}`,
+        recipient || '(none)', wellFormed && recipient.toLowerCase() !== shop.PLATFORM_TEMPO.toLowerCase());
+    }
 
     // 28.3 — replay of the same quote -> same binding.
     const again = await shop.createQuote(config, SKU, undefined, idem);
