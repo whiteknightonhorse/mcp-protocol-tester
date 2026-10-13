@@ -120,6 +120,9 @@ CONCURRENCY=10 npm test
 | P25   | Time Promises      | Plants a real expiring moderation record, verifies it's actually gone after the real 14-day retention window (sacrificial key only) | ~$0.001 |
 | P26   | Coverage Parity    | Live nginx.conf's declared public locations vs this suite's own probed-route inventory | $0 |
 | P27   | Storefront Surface | Demo shop MCP initialize + tools/list, `/m/<slug>` + agent.json + llms.txt URLs, `/shops`, `/integrator` (+ Markdown negotiation), discover `kind=merchant` vs `/shops` parity (demo mode, GET only) | $0 |
+| P28   | Shop Order Flow    | Demo shop quote for demo-bundle, 402 challenge (amount, x402 payTo and MPP recipient are not platform wallets, both rails), replay of the same quote -> same binding, amount mismatch -> 402 with the order left QUOTED; pay -> DELIVERED and receipt replay are SKIPPED (no demo settlement, would cost money) | $0 |
+| P29   | Subscriptions      | demo-daily subscribe quote + terms (daily, 72 h window), 402 challenge, refusals (non-subscription SKU, qty 2), 404 on unknown subscription routes; renewal / cancel / double-renew / past_due are SKIPPED (need a paid period 1) | $0 |
+| P32   | Webhook Signature  | Tester-local HTTP receiver: valid HMAC accepted, wrong secret and tampered body rejected, replayed delivery id ignored, timestamp older than 300 s rejected; scheme from `src/shop/webhook/webhook.service.ts:37-40` | $0 |
 | P34   | Legal 428 Gate     | `/legal/index.json` sha256 vs served bodies; unaccepted-merchant quote gate: machine-readable 428 once a document is past the 30-day re-accept window (before that: not refused) | $0 |
 
 ⚠️ **Note found in passing while adding P20-P26 (not fixed — out of this

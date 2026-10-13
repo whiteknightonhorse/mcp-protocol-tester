@@ -10,7 +10,7 @@ const WEIGHTS = [
   ['P16', 5], ['P17', 7], ['P18', 9], ['P19', 5],
   // Э3 new phases — see docs/ADDING-PHASES.md for what each proves and its
   // documented broken-state control.
-  ['P20', 6], ['P21', 5], ['P22', 6], ['P23', 3], ['P24', 5], ['P25', 3], ['P26', 4], ['P27', 4], ['P34', 3],
+  ['P20', 6], ['P21', 5], ['P22', 6], ['P23', 3], ['P24', 5], ['P25', 3], ['P26', 4], ['P27', 4], ['P28', 4], ['P29', 3], ['P32', 3], ['P34', 3],
 ];
 
 function generateReport(scorer, meta) {
@@ -56,7 +56,7 @@ function generateReport(scorer, meta) {
     P19: 'CDP Facilitator',
     P20: 'Moderation E2E', P21: 'Appeals', P22: 'Balance Rail', P23: 'Devices',
     P24: 'Docs/Catalog Truth', P25: 'Time Promises', P26: 'Coverage Parity',
-    P27: 'Storefront Surface', P34: 'Legal 428 Gate',
+    P27: 'Storefront Surface', P28: 'Shop Order Flow', P29: 'Subscriptions', P32: 'Webhook Signature', P34: 'Legal 428 Gate',
   };
   pts.forEach(([id, v, mx, skip]) => {
     if (skip === 'SKIP') w(`  ${(LABELS[id] || id).padEnd(24)} [SKIP] — ${scorer.skipReasons[id] || 'no reason given'}`);
