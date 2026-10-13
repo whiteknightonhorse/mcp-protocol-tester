@@ -52,6 +52,9 @@ const PROBED_PREFIXES = [
   // (slash-canonical redirects) below — entries here just make the prefix
   // list honest about what's covered.
   '/why.md', '/auth.md', '/video', '/guides',
+  // T-0348: probed by P27 (/m/, /shops, /integrator), P34 (/legal) and P24
+  // 24.4 (/about, /index.md). Data only; the parity logic is untouched.
+  '/m/', '/shops', '/legal', '/integrator', '/about', '/index.md',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every

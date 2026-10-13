@@ -47,6 +47,8 @@ const phase23 = require('./phases/23-devices');
 const phase24 = require('./phases/24-docs-truth');
 const phase25 = require('./phases/25-time-promises');
 const phase26 = require('./phases/26-coverage-parity');
+const phase27 = require('./phases/27-storefront-surface');
+const phase34 = require('./phases/34-legal-428');
 const phaseReport = require('./phases/15-report');
 
 async function main() {
@@ -120,6 +122,8 @@ async function main() {
   if (config.phaseEnabled(24)) await phase24(scorer, config, context);
   if (config.phaseEnabled(25)) await phase25(scorer, config, context);
   if (config.phaseEnabled(26)) await phase26(scorer, config, context);
+  if (config.phaseEnabled(27)) await phase27(scorer, config, context);
+  if (config.phaseEnabled(34)) await phase34(scorer, config, context);
 
   // Report: Always generate
   const totalTime = Math.round((Date.now() - t0) / 1000);

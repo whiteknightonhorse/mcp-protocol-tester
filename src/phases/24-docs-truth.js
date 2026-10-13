@@ -35,6 +35,19 @@ const STATIC_PAGES = ['/', '/connect', '/frameworks', '/pricing', '/catalog', '/
   '/contact', '/privacy', '/terms', '/policy/moderation', '/why', '/partners',
   '/flight-search-intent', '/image-generation-intent', '/company-research-intent'];
 
+// T-0348: pages whose body must stay clean of placeholder / draft markers.
+// P24 had no such list before this card; it is introduced here for /about and
+// /index.md (the "Drafts, not yet published" banner is what an unpublished
+// integrator page renders).
+const FORBIDDEN_PHRASES = ['not yet published', 'lorem ipsum', 'TODO', 'FIXME', 'undefined', '[object Object]',
+  'coingecko.get_price'];
+
+// T-0348: { path, ct } probes added for the pages 26.1 reported as unprobed.
+const TRUTH_PROBES = [
+  { path: '/about', ct: 'text/html', canonical: 'https://apibase.pro/about' },
+  { path: '/index.md', ct: 'text/markdown', canonical: null },
+];
+
 function extractToolRefs(html) {
   const refs = new Set();
   const re = /tools\/([a-zA-Z0-9_.-]+)\/call/g;
@@ -99,6 +112,39 @@ module.exports = async function phase24(scorer, config, context) {
   // score — same conversion-critical-surface reasoning as the original Д6.
   scorer.redRec(PHASE, '24.2 no stale tool references on any static page', '0 stale',
     `${allStale.length} stale`, allStale.length === 0, allStale.join(', ') || 'all references resolve');
+
+  // 24.4 — /about and /index.md (T-0348): 200 + expected content-type, an
+  // absolute canonical on the HTML page, no forbidden phrases, and (shared
+  // with 24.2) every tools/<id>/call reference resolves.
+  for (const probe of TRUTH_PROBES) {
+    try {
+      const r = await sf(`${config.apiBaseUrl}${probe.path}`);
+      const ct = r.headers?.get?.('content-type') || '';
+      const body = r.status === 200 ? await r.text() : (await drain(r), '');
+      const ctOk = ct.includes(probe.ct);
+      scorer.rec(PHASE, `24.4 ${probe.path} 200 ${probe.ct}`, `200 ${probe.ct}`, `${r.status} ${ct.split(';')[0]}`,
+        r.status === 200 && ctOk && body.length > 0);
+      if (r.status !== 200) continue;
+      if (probe.canonical) {
+        const m = body.match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+        scorer.rec(PHASE, `24.4 ${probe.path} canonical`, probe.canonical, m ? m[1] : '(none)',
+          !!m && m[1] === probe.canonical);
+      }
+      const hits = FORBIDDEN_PHRASES.filter((ph) => body.toLowerCase().includes(ph.toLowerCase()));
+      scorer.rec(PHASE, `24.4 ${probe.path} no forbidden phrases`, 'none', hits.join(', ') || 'none', hits.length === 0);
+      const stale = extractToolRefs(body).filter((id) => !catalogIds.has(id));
+      const reallyStale = [];
+      for (const id of stale) {
+        const rt = await sf(`${config.apiUrl}/tools/${id}`);
+        await drain(rt);
+        if (rt.status !== 200) reallyStale.push(id);
+      }
+      scorer.rec(PHASE, `24.4 ${probe.path} tool references resolve`, '0 stale', `${reallyStale.length} stale`,
+        reallyStale.length === 0, reallyStale.join(', '));
+    } catch (e) {
+      scorer.recCatch(PHASE, `24.4 ${probe.path}`, `200 ${probe.ct}`, e);
+    }
+  }
 
   // 24.3 — page-count claims roughly match the live catalog (count-drift
   // class fixed multiple times already per the redesign work — this is the

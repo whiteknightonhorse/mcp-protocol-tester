@@ -116,9 +116,11 @@ CONCURRENCY=10 npm test
 | P21   | Appeals            | /appeals/:id + /api/v1/appeals/:id path-param fuzz (5 hostile values x 2 routes), immediate liveness check after each | $0 |
 | P22   | Balance Rail       | Plain-Bearer call (no x402/MPP header) against a priced tool must pay from balance; balance must actually decrease (sacrificial key only) | varies |
 | P23   | Devices            | device.list/state/command + safety-gate rejection of an out-of-bounds command (sacrificial key only) | $0 |
-| P24   | Docs/Catalog Truth | Every static page's `tools/<id>/call` references cross-checked against the live catalog; homepage tool-count drift | $0 |
+| P24   | Docs/Catalog Truth | Every static page's `tools/<id>/call` references cross-checked against the live catalog; homepage tool-count drift; `/about` and `/index.md` (200, content-type, canonical, forbidden phrases) | $0 |
 | P25   | Time Promises      | Plants a real expiring moderation record, verifies it's actually gone after the real 14-day retention window (sacrificial key only) | ~$0.001 |
 | P26   | Coverage Parity    | Live nginx.conf's declared public locations vs this suite's own probed-route inventory | $0 |
+| P27   | Storefront Surface | Demo shop MCP initialize + tools/list, `/m/<slug>` + agent.json + llms.txt URLs, `/shops`, `/integrator` (+ Markdown negotiation), discover `kind=merchant` vs `/shops` parity (demo mode, GET only) | $0 |
+| P34   | Legal 428 Gate     | `/legal/index.json` sha256 vs served bodies; unaccepted-merchant quote gate: machine-readable 428 once a document is past the 30-day re-accept window (before that: not refused) | $0 |
 
 ⚠️ **Note found in passing while adding P20-P26 (not fixed — out of this
 pass's scope):** this table's OWN numbering for P15-P18 above does not match
