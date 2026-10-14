@@ -61,7 +61,7 @@ function wrongAmountPayment(quoteId, payTo, micro) {
       authorization: {
         from: '0x0000000000000000000000000000000000000001', to: payTo, value: String(micro),
         validAfter: '0', validBefore: '9999999999',
-        nonce: '0x0000000000000000000000000000000000000000000000000000000000000001',
+        nonce: '0x' + '0'.repeat(63) + '1',
       },
     },
   })).toString('base64');
