@@ -41,14 +41,22 @@ async function fingerprintChecks(scorer, config, url, sid, apiKey, tools, contex
   // 4.F1
   const mcpHash = new Map();
   let missing = 0;
+  const missingBySeg = new Map();
   for (const t of tools) {
     const h = t._meta?.[META_HASH_KEY];
     const ok = typeof h === 'string' && HEX64.test(h);
     scorer.recQ(PHASE, `4.F1 meta hash ${t.name}`, '64 hex', ok ? 'ok' : 'bad', ok);
-    if (ok) mcpHash.set(t.name, h); else missing++;
+    if (ok) mcpHash.set(t.name, h);
+    else {
+      missing++;
+      const seg = String(t.name).split('.')[0];
+      missingBySeg.set(seg, (missingBySeg.get(seg) || 0) + 1);
+    }
   }
+  // Ruling 0501 ruling-1: name the gap by first name segment (expected today: shop.* 25).
+  const grouped = [...missingBySeg.entries()].sort((a, b) => b[1] - a[1]).map(([s, n]) => `${s}.* ${n}`).join(', ');
   scorer.rec(PHASE, '4.F1 tools/list carries definition_sha256', '0 missing', missing,
-    missing === 0 && tools.length > 0, `${missing} of ${tools.length} tools missing`);
+    missing === 0 && tools.length > 0, `${missing} of ${tools.length} tools missing${grouped ? ': ' + grouped : ''}`);
 
   // 4.F2
   let manifest = null;
