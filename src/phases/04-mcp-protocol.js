@@ -141,7 +141,8 @@ module.exports = async function phase4(scorer, config, context) {
         const settle = extractPaymentResponseFromMeta(pr);
         const ok = !!pr && pr.isError !== true && !!settle && settle.success === true;
         const price = parseFloat(http402?.price_usd) || 0;
-        if (ok) context.spentX402 += price;
+        // A settled payment is spent whether or not the receipt _meta is present.
+        if (!!pr && pr.isError !== true) context.spentX402 += price;
         scorer.rec(PHASE, '4.N+1 x402 payment in params._meta returns payment-response',
           'result + _meta x402/payment-response success',
           `isError=${pr?.isError} settle=${settle ? 'success=' + settle.success : 'absent'}`, ok,
