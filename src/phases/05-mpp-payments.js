@@ -224,11 +224,15 @@ async function clientLanes(scorer, config, context) {
       const rep = await sendWithCredential(url, { ...base, ...bearer }, body, settled.credential);
       const code = rep.json?.error_code;
       const ok = rep.status === 403 && code === 'credential_replayed' && rep.json?.charged === false;
-      // RED is the money invariant: a settled credential must never be served again.
-      // The exact answer (final 403 credential_replayed, charged:false) is a rec: the
-      // prod build at T-0433 time still answers 400 BAD_REQUEST (see the T-0433 note).
-      scorer.redRec(PHASE, '5.N+2 settled credential replay is refused', 'not 200',
-        String(rep.status), rep.status !== 200 && rep.status > 0);
+      // RED is the money invariant: a replayed credential is never served and never
+      // yields a receipt (any 2xx or any Payment-Receipt header is a defect).
+      // 5.N+2b (final 403 credential_replayed, charged:false) is a rec: server defect,
+      // the mppx charge handler returns the 403 as result.challenge while the
+      // middleware checks result.status, so prod answers 400. Tighten 5.N+2b to
+      // redRec after the server fix ships (ruling 0433 q-1 ruling-2).
+      const hasReceipt = !!rep.headers?.get?.('payment-receipt');
+      scorer.redRec(PHASE, '5.N+2 settled credential replay is refused', 'not 200, no Payment-Receipt',
+        `${rep.status} receipt=${hasReceipt}`, rep.status > 0 && rep.status !== 200 && !hasReceipt);
       scorer.rec(PHASE, '5.N+2b settled credential replay is a final 403', '403 credential_replayed charged:false',
         `${rep.status} ${code || '(no error_code)'} charged=${rep.json?.charged}`, ok);
     } catch (e) {

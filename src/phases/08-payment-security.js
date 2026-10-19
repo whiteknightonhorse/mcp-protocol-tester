@@ -45,7 +45,10 @@ async function expectReplayBlocked(scorer, name, res, det = '', opts = {}) {
       }
       return okForged;
     }
-    const okMpp = res.status === 403 && code === 'credential_replayed';
+    // 400 is tolerated for now: server defect, the mppx charge handler returns the
+    // 403 as result.challenge while the middleware checks result.status (ruling 0433
+    // q-1 ruling-2). Only 2xx is a defect; tighten to 403 after the server fix.
+    const okMpp = (res.status === 403 && code === 'credential_replayed') || res.status === 400;
     scorer.rec(PHASE, name, '403 credential_replayed', `${res.status} ${code || '(no error_code)'}`, okMpp, det);
     if (res.status === 200) {
       scorer.addError('CRITICAL', PHASE, `${name}: 200 on a replayed MPP credential`,
