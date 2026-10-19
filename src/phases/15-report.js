@@ -15,6 +15,7 @@ module.exports = async function phase17(scorer, config, context) {
     toolCount: context.catalog.length,
     spentX402: context.spentX402,
     spentMPP: context.spentMPP,
+    mppxValidate: context.mppxValidate || context.mppxValidateSummary || null,
     hasMPP: context.hasMPP,
     hasX402: context.hasX402,
     balBase: context.balBase,

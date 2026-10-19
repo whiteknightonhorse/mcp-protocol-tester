@@ -87,6 +87,7 @@ async function main() {
   // Init payment clients
   const x402ok = config.privateKey ? initX402(config.privateKey) : false;
   const mppok = config.privateKey ? initMPP(config.privateKey) : false;
+  if (config.privateKey) initMPP(config.privateKey, { legacy: true });
   console.log(`  x402 wallet: ${x402ok ? getWalletAddress() : 'NONE'}`);
   console.log(`  MPP client:  ${mppok ? 'ready' : 'NONE'}\n`);
 
@@ -138,6 +139,7 @@ async function main() {
     toolCount: context.catalog.length,
     spentX402: context.spentX402,
     spentMPP: context.spentMPP,
+    mppxValidate: context.mppxValidateSummary || null,
     totalTime,
   };
   await phaseReport(scorer, config, { ...context, ...meta });

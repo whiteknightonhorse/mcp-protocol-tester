@@ -174,6 +174,36 @@ module.exports = async function phase3(scorer, config, context) {
     uniqueNonces === nonceProbes.length || nonceProbes.length < 2,
     uniqueNonces < nonceProbes.length ? 'DUPLICATE nonces — replay risk!' : 'all unique');
 
+  // T-0433 — caching and timeout contract of the 402 challenge. A cached 402
+  // would replay a stale challenge id/nonce to a different client, so each
+  // rail's challenge must be `Cache-Control: no-store`.
+  try {
+    const cr = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {}) },
+      body: '{}',
+    });
+    const cc = (cr.headers?.get?.('cache-control') || '').toLowerCase();
+    const hasX402 = !!cr.headers?.get?.('payment-required');
+    const hasMpp = !!cr.headers?.get?.('www-authenticate');
+    let cb = null;
+    try { cb = await cr.json(); } catch { await drain(cr); }
+    const noStore = cc.split(',').map((d) => d.trim()).indexOf('no-store') !== -1;
+    if (cr.status === 402) {
+      scorer.rec(PHASE, '3.N 402 Cache-Control no-store (x402 rail)', 'no-store',
+        hasX402 ? (cc || '(none)') : 'no PAYMENT-REQUIRED header', hasX402 && noStore);
+      scorer.rec(PHASE, '3.N 402 Cache-Control no-store (MPP rail)', 'no-store',
+        hasMpp ? (cc || '(none)') : 'no WWW-Authenticate header', hasMpp && noStore);
+      const mt = cb?.accepts?.[0]?.maxTimeoutSeconds;
+      scorer.rec(PHASE, '3.N maxTimeoutSeconds is 120', '120', String(mt), mt === 120);
+    } else {
+      scorer.rec(PHASE, '3.N 402 Cache-Control / maxTimeoutSeconds', '402', String(cr.status), false,
+        'could not obtain a 402 challenge for crypto.trending');
+    }
+  } catch (e) {
+    scorer.recCatch(PHASE, '3.N 402 Cache-Control / maxTimeoutSeconds', '402', e);
+  }
+
   scorer.rec(PHASE, 'x402-challenge-summary',
     `>${tools.length * 0.5} valid`, `${stats.correct402}/${tools.length}`,
     stats.correct402 > 0,

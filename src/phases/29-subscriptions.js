@@ -12,13 +12,16 @@
  * tester does not control).
  */
 const shop = require('../lib/shop-api');
+const { sf, drain } = require('../lib/http');
+const { mcpRequest } = require('../lib/mcp-client');
 
 const PHASE = 'P29';
 const SKU = 'demo-daily';
 const NO_SUB = '00000000-0000-4000-8000-000000000000';
 
-module.exports = async function phase29(scorer, config) {
+module.exports = async function phase29(scorer, config, context) {
   console.log('\n--- Phase 29: Subscriptions (demo-daily, $0) ---');
+  await mppSubscriptionMode(scorer, config, context);
   let quote = null;
 
   try {
@@ -99,3 +102,31 @@ module.exports = async function phase29(scorer, config) {
     }
   }
 };
+
+// T-0433 (T-0431): the third pull mode `mpp_subscription` is only asserted when
+// the integrator docs enumerate it, so a tester run against an older build is
+// not red. No money moves: this reads the docs and the tool description.
+async function mppSubscriptionMode(scorer, config, context) {
+  try {
+    const r = await sf(`${config.apiBaseUrl}/integrator/docs`, { headers: { Accept: 'text/markdown' } });
+    const docs = r.status === 200 ? await r.text() : (await drain(r), '');
+    const shipped = docs.indexOf('mpp_subscription') !== -1;
+    if (!shipped) {
+      scorer.blocked(PHASE, '29.7 mpp_subscription pull mode', 'NOT-SHIPPED',
+        'pull_mode enum in /integrator/docs does not list mpp_subscription yet (T-0431 not deployed)');
+      return;
+    }
+    const mcpUrl = `${config.apiBaseUrl}/mcp/m/${shop.SLUG}`;
+    const init = await mcpRequest(mcpUrl, 'initialize', {
+      protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'mcp-protocol-tester', version: '1.0' },
+    });
+    const list = await mcpRequest(mcpUrl, 'tools/list', {}, init.sessionId);
+    const t = (list.body?.result?.tools || []).find((x) => x.name === 'shop.subscription.get');
+    const desc = t ? String(t.description || '') : '';
+    scorer.rec(PHASE, '29.7 shop.subscription.get describes mpp_subscription', 'description names mpp_subscription',
+      t ? (desc.indexOf('mpp_subscription') !== -1 ? 'present' : 'absent') : 'tool missing',
+      !!t && desc.indexOf('mpp_subscription') !== -1);
+  } catch (e) {
+    scorer.recCatch(PHASE, '29.7 mpp_subscription pull mode', 'docs fetched', e);
+  }
+}

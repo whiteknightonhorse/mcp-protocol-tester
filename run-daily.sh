@@ -78,8 +78,10 @@ else
     console.log('SCORE=' + r.score);
     console.log('GRADE=' + r.grade);
     console.log('VERDICT=' + r.verdict);
+    console.log('MPPX_VALIDATE=' + JSON.stringify(r.mppxValidate || 'not run'));
   ")"
   echo "[$(date +%Y%m%d_%H%M%S)] Score: ${SCORE}/100 Grade: ${GRADE} Verdict: ${VERDICT} (node exit ${TEST_EXIT})" >> "$LOG"
+  echo "[$(date +%Y%m%d_%H%M%S)] mppx validate: ${MPPX_VALIDATE}" >> "$LOG"
 
   # --- Э1: verdict + standing-red ledger / diff / escalation ----------------
   ALERT_MSG=$(node scripts/verdict-runner.js "$JSON_REPORT" 2>>"$LOG")

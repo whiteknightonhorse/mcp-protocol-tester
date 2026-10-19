@@ -8,6 +8,11 @@ A run's VERDICT is FAIL, independent of how high the score is, if any of:
   check, a public 404, or a catalog-sanity precondition (see `redRec()` call
   sites across the phases, especially P20-P26);
 - a CRITICAL error was recorded (500s, etc.);
+- one of the RED assertions added by T-0433 failed: P2 currency pin (exactly
+  one currency, USDC.e on mainnet / pathUSD on testnet, never OUSD), P5 current
+  mppx client pays and returns a `Payment-Receipt` with a tx-hash reference, P5
+  settled-credential replay is refused (never 200; the exact final 403
+  `credential_replayed` answer is a non-RED rec), P17 nine path-encoding bypass vectors never serve unpaid;
 - more than 6 phases were SKIPped (a skip must always state a reason —
   `scorer.skip(phase, reason)` — but too many of them isn't a trustworthy
   PASS either).

@@ -5,9 +5,25 @@
  */
 const { mcpRequest } = require('../lib/mcp-client');
 const { sf, drain } = require('../lib/http');
+const { getX402Client, makeX402PaymentPayload } = require('../lib/x402-client');
+const { attachPaymentToMeta, extractPaymentResponseFromMeta } = require('@x402/mcp');
 
 const PHASE = 'P4';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// T-0433: MCP transport of the x402 challenge/receipt. The server puts the
+// challenge in result._meta["x402/payment-required"] (same body as the HTTP
+// 402) and accepts the payment in params._meta["x402/payment"].
+const MCP_PAID_TOOL = { mcp: 'crypto.trending.get', rest: 'crypto.trending' };
+const META_REQUIRED_KEY = 'x402/payment-required';
+
+function stable(v) {
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+  }
+  return JSON.stringify(v);
+}
 
 module.exports = async function phase4(scorer, config, context) {
   console.log('\n--- Phase 4: MCP Protocol ---');
@@ -85,6 +101,56 @@ module.exports = async function phase4(scorer, config, context) {
     } catch (e) {
       scorer.rec(PHASE, 'mcp-tools-call', 'success', 'error', false, e.message);
     }
+  }
+
+  // 4.N MCP `_meta` payment transport (T-0433).
+  if (sid) {
+    try {
+      const restRes = await sf(`${config.apiUrl}/tools/${MCP_PAID_TOOL.rest}/call`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: '{}',
+      });
+      let http402 = null;
+      try { http402 = await restRes.json(); } catch { await drain(restRes); }
+
+      const unpaid = await mcpRequest(url, 'tools/call', { name: MCP_PAID_TOOL.mcp, arguments: {} }, sid, apiKey);
+      const res = unpaid.body?.result;
+      const metaReq = res?._meta?.[META_REQUIRED_KEY];
+      const sameAccepts = !!http402?.accepts && !!metaReq?.accepts && stable(metaReq.accepts) === stable(http402.accepts);
+      scorer.rec(PHASE, '4.N unpaid paid-tool call: isError + _meta payment-required equals HTTP 402',
+        'isError:true, _meta accepts[] == HTTP 402 accepts[]',
+        `isError=${res?.isError} meta=${!!metaReq} equal=${sameAccepts}`,
+        res?.isError === true && sameAccepts);
+
+      const canPay = !config.skipPayments && !!config.privateKey && !!getX402Client();
+      if (!canPay) {
+        scorer.rec(PHASE, '4.N+1 x402 payment in params._meta returns payment-response', 'skip', 'no wallet', true,
+          'payments disabled or no wallet configured');
+      } else if (!metaReq?.accepts) {
+        scorer.rec(PHASE, '4.N+1 x402 payment in params._meta returns payment-response', '_meta payment-response',
+          'no challenge to pay', false, 'previous step produced no _meta challenge');
+      } else if (context.spentX402 >= config.maxBudget) {
+        scorer.rec(PHASE, '4.N+1 x402 payment in params._meta returns payment-response', 'paid', 'budget-exceeded', false,
+          `spent $${context.spentX402.toFixed(4)} >= max $${config.maxBudget}`);
+      } else {
+        const payload = await makeX402PaymentPayload(metaReq);
+        const params = attachPaymentToMeta({ name: MCP_PAID_TOOL.mcp, arguments: {} }, payload);
+        const paid = await mcpRequest(url, 'tools/call', params, sid, apiKey);
+        const pr = paid.body?.result;
+        const settle = extractPaymentResponseFromMeta(pr);
+        const ok = !!pr && pr.isError !== true && !!settle && settle.success === true;
+        const price = parseFloat(http402?.price_usd) || 0;
+        if (ok) context.spentX402 += price;
+        scorer.rec(PHASE, '4.N+1 x402 payment in params._meta returns payment-response',
+          'result + _meta x402/payment-response success',
+          `isError=${pr?.isError} settle=${settle ? 'success=' + settle.success : 'absent'}`, ok,
+          `cost=$${price.toFixed(6)}`);
+      }
+    } catch (e) {
+      scorer.recCatch(PHASE, '4.N MCP _meta payment transport', '_meta challenge + payment-response', e);
+    }
+    await sleep(300);
   }
 
   // 5. Test invalid method

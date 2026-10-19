@@ -45,4 +45,14 @@ async function makeX402Payment(body402) {
   return _httpClient.encodePaymentSignatureHeader(payload);
 }
 
-module.exports = { initX402, getX402Client, getX402HttpClient, getWalletAddress, makeX402Payment };
+// Payment payload object (not the encoded header) for transports that carry
+// it as JSON, e.g. MCP `params._meta["x402/payment"]`.
+async function makeX402PaymentPayload(body402) {
+  return _x402c.createPaymentPayload({
+    x402Version: 2,
+    resource: body402.resource || { url: '', description: '' },
+    accepts: body402.accepts,
+  });
+}
+
+module.exports = { makeX402PaymentPayload, initX402, getX402Client, getX402HttpClient, getWalletAddress, makeX402Payment };

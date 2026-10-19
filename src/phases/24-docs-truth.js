@@ -146,6 +146,38 @@ module.exports = async function phase24(scorer, config, context) {
     }
   }
 
+  // 24.5 (T-0433) — payment wording on the agent-facing text surfaces. The
+  // card names /integrator/agent-guide.md, which does not exist; the same
+  // document is served by content negotiation on /integrator/agent-guide
+  // (Accept: text/markdown), so that is what is fetched.
+  // positive: strings the surface must carry; negative: wording that must be gone.
+  const WORDING_DOCS = [
+    { path: '/integrator/agent-guide', accept: 'text/markdown', positive: true },
+    { path: '/auth.md', positive: true },
+    { path: '/llms.txt', positive: true },
+    { path: '/.well-known/x402-payment.json', positive: false },
+  ];
+  for (const d of WORDING_DOCS) {
+    try {
+      const r = await sf(`${config.apiBaseUrl}${d.path}`, d.accept ? { headers: { Accept: d.accept } } : {});
+      const text = r.status === 200 ? await r.text() : (await drain(r), '');
+      scorer.rec(PHASE, `24.5 ${d.path} fetched`, '200', String(r.status), r.status === 200 && text.length > 0);
+      if (r.status !== 200) continue;
+      if (d.positive) {
+        scorer.rec(PHASE, `24.5 ${d.path} states mppx >= 0.6.16`, 'present', text.indexOf('mppx >= 0.6.16') !== -1 ? 'present' : 'absent',
+          text.indexOf('mppx >= 0.6.16') !== -1);
+        scorer.rec(PHASE, `24.5 ${d.path} names USDC.e`, 'present', text.indexOf('USDC.e') !== -1 ? 'present' : 'absent',
+          text.indexOf('USDC.e') !== -1);
+      }
+      scorer.rec(PHASE, `24.5 ${d.path} has no coinbase/x402 link`, 'absent', text.toLowerCase().indexOf('coinbase/x402') !== -1 ? 'present' : 'absent',
+        text.toLowerCase().indexOf('coinbase/x402') === -1);
+      const memoNearQuote = /memo[^\n]{0,60}quote|quote[^\n]{0,60}memo/i.test(text);
+      scorer.rec(PHASE, `24.5 ${d.path} no "memo" next to "quote"`, 'absent', memoNearQuote ? 'present' : 'absent', !memoNearQuote);
+    } catch (e) {
+      scorer.recCatch(PHASE, `24.5 ${d.path}`, '200', e);
+    }
+  }
+
   // 24.3 — page-count claims roughly match the live catalog (count-drift
   // class fixed multiple times already per the redesign work — this is the
   // standing check so it can't silently drift back).

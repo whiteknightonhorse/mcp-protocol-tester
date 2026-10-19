@@ -5,6 +5,7 @@
  */
 const { sf, drain, getDelay, withTesterHeader } = require('../lib/http');
 const { getMppClient } = require('../lib/mpp-client');
+const { TX_HASH_RE, obtainCredential, sendWithCredential, chargeOnce, runMppxValidate } = require('../lib/mpp-pay');
 const { getBody } = require('../utils/assert');
 
 const PHASE = 'P5';
@@ -159,4 +160,145 @@ module.exports = async function phase5(scorer, config, context) {
   }
 
   console.log(`  MPP payments: ${stats.paid}/${tools.length} | spent: $${context.spentMPP.toFixed(4)}`);
+
+  await clientLanes(scorer, config, context);
 };
+
+// ---------------------------------------------------------------------------
+// T-0433 — client lanes, final-403 replay, credential transport, mppx validate
+// ---------------------------------------------------------------------------
+
+const LANE_TOOL = { id: 'earthquake.feed', body: {} };
+
+async function clientLanes(scorer, config, context) {
+  const cur = getMppClient(false);
+  const legacy = getMppClient(true);
+  const key = context.freshAuth || config.apiKey;
+  const url = `${config.apiUrl}/tools/${LANE_TOOL.id}/call`;
+  const body = JSON.stringify(LANE_TOOL.body);
+  const base = { 'Content-Type': 'application/json' };
+  const bearer = key ? { Authorization: `Bearer ${key}`, 'X-API-Key': key } : {};
+  const budgetLeft = () => context.spentMPP < config.maxBudget;
+
+  // 5.N current client (mppx 0.13.x): 200 + Payment-Receipt + tx-hash reference.
+  let settled = null;
+  try {
+    if (!cur) throw new Error('current mppx client not initialized');
+    if (!budgetLeft()) throw new Error('budget exhausted');
+    const r = await chargeOnce(cur, url, { ...base, ...bearer }, body);
+    if (!r.ok) {
+      scorer.redRec(PHASE, '5.N mppx 0.13.5 client pays one tool', '200 + Payment-Receipt (tx hash)', r.error, false);
+    } else {
+      const refOk = typeof r.receipt?.reference === 'string' && TX_HASH_RE.test(r.receipt.reference);
+      const ok = r.status === 200 && !!r.receipt && refOk;
+      context.spentMPP += r.costUsd;
+      scorer.redRec(PHASE, '5.N mppx 0.13.5 client pays one tool', '200 + Payment-Receipt (tx hash)',
+        `${r.status} receipt=${!!r.receipt} txhash=${refOk}`, ok, `cost=$${r.costUsd.toFixed(6)}`);
+      if (r.status === 200) settled = r;
+    }
+  } catch (e) {
+    scorer.recCatch(PHASE, '5.N mppx 0.13.5 client pays one tool', '200', e);
+  }
+  await sleep(getDelay(LANE_TOOL.id));
+
+  // 5.N+1 legacy client (mppx 0.8.19): documented compatibility.
+  try {
+    if (!legacy) throw new Error('legacy mppx client not initialized');
+    if (!budgetLeft()) throw new Error('budget exhausted');
+    const r = await chargeOnce(legacy, url, { ...base, ...bearer }, body);
+    if (!r.ok) {
+      scorer.rec(PHASE, '5.N+1 legacy mppx 0.8.19 client pays one tool', '200', r.error, false);
+    } else {
+      context.spentMPP += r.costUsd;
+      scorer.rec(PHASE, '5.N+1 legacy mppx 0.8.19 client pays one tool', '200', String(r.status),
+        r.status === 200, `cost=$${r.costUsd.toFixed(6)} receipt=${!!r.receipt}`);
+    }
+  } catch (e) {
+    scorer.recCatch(PHASE, '5.N+1 legacy mppx 0.8.19 client pays one tool', '200', e);
+  }
+  await sleep(getDelay(LANE_TOOL.id));
+
+  // 5.N+2 re-send the settled credential: final 403 credential_replayed, charged:false.
+  if (settled) {
+    try {
+      const rep = await sendWithCredential(url, { ...base, ...bearer }, body, settled.credential);
+      const code = rep.json?.error_code;
+      const ok = rep.status === 403 && code === 'credential_replayed' && rep.json?.charged === false;
+      // RED is the money invariant: a settled credential must never be served again.
+      // The exact answer (final 403 credential_replayed, charged:false) is a rec: the
+      // prod build at T-0433 time still answers 400 BAD_REQUEST (see the T-0433 note).
+      scorer.redRec(PHASE, '5.N+2 settled credential replay is refused', 'not 200',
+        String(rep.status), rep.status !== 200 && rep.status > 0);
+      scorer.rec(PHASE, '5.N+2b settled credential replay is a final 403', '403 credential_replayed charged:false',
+        `${rep.status} ${code || '(no error_code)'} charged=${rep.json?.charged}`, ok);
+    } catch (e) {
+      scorer.recCatch(PHASE, '5.N+2 settled credential replay is a final 403', '403', e);
+    }
+  } else {
+    scorer.rec(PHASE, '5.N+2 settled credential replay is a final 403', '403 credential_replayed', 'no settled credential', false,
+      'the 0.13.5 charge above did not settle, replay cannot be exercised');
+  }
+  await sleep(300);
+
+  // 5.N+3 transport: credential in Payment-Authorization next to a Bearer API key -> 200.
+  try {
+    if (!cur || !key) throw new Error('no client or API key');
+    if (!budgetLeft()) throw new Error('budget exhausted');
+    const r = await chargeOnce(cur, url, { ...base, Authorization: `Bearer ${key}` }, body, 'Payment-Authorization');
+    if (!r.ok) {
+      scorer.rec(PHASE, '5.N+3 Payment-Authorization credential + Bearer API key', '200', r.error, false);
+    } else {
+      context.spentMPP += r.costUsd;
+      scorer.rec(PHASE, '5.N+3 Payment-Authorization credential + Bearer API key', '200', String(r.status), r.status === 200,
+        `cost=$${r.costUsd.toFixed(6)}`);
+    }
+  } catch (e) {
+    scorer.recCatch(PHASE, '5.N+3 Payment-Authorization credential + Bearer API key', '200', e);
+  }
+  await sleep(300);
+
+  // 5.N+4 both headers carry credentials -> 400 (ambiguous). The credential is
+  // never settled when the server refuses, so this costs nothing.
+  try {
+    if (!cur) throw new Error('no client');
+    const c = await obtainCredential(cur, url, { ...base, ...bearer }, body);
+    if (c.error) {
+      scorer.rec(PHASE, '5.N+4 two credential headers are refused', '400', c.error, false);
+    } else {
+      const r = await sf(url, {
+        method: 'POST',
+        headers: { ...base, Authorization: c.credential, 'Payment-Authorization': c.credential },
+        body,
+      }, 60000);
+      try { await r.text(); } catch {}
+      scorer.rec(PHASE, '5.N+4 two credential headers are refused', '400', String(r.status), r.status === 400);
+    }
+  } catch (e) {
+    scorer.recCatch(PHASE, '5.N+4 two credential headers are refused', '400', e);
+  }
+
+  // 5.N+5 mppx validate (child process), scoped to the one endpoint.
+  const v = await runMppxValidate(config.apiBaseUrl, LANE_TOOL.id);
+  if (v.spawnFailed || !v.json) {
+    scorer.recCatch(PHASE, '5.N+5 mppx validate', 'exit 0', new Error(v.errMsg || 'no JSON output'));
+  } else {
+    const ep = v.json.endpoints?.[0] || {};
+    const groups = [ep.challenge, ep.errorHandling, ep.payment].flat().filter(Boolean);
+    const failed = groups.filter((c) => c.severity === 'fail');
+    const s = v.json.summary || {};
+    const summary = `exit=${v.exitCode} passed=${s.passed} failed=${s.failed} warnings=${s.warnings} skipped=${s.skipped}`;
+    scorer.rec(PHASE, '5.N+5 mppx validate: endpoint checks pass', '0 failed endpoint checks',
+      `${failed.length} failed of ${groups.length}`, failed.length === 0 && groups.length > 0,
+      `${summary}${failed.length ? ' | ' + failed.map((c) => c.label).join('; ').slice(0, 120) : ''}`);
+    context.mppxValidateSummary = summary;
+    // The discovery document is a separate finding from the endpoint
+    // challenge: validate exits non-zero when it is invalid. Recorded as a
+    // recommendation so a server-side OpenAPI defect never hides.
+    const dFail = (v.json.discovery?.checks || []).filter((c) => c.severity === 'fail');
+    if (v.exitCode !== 0 && dFail.length > 0) {
+      const labels = [...new Set(dFail.map((c) => c.label))].slice(0, 2).join('; ');
+      scorer.addRec('PROTOCOL', 'P5 mppx validate exits non-zero on discovery',
+        `${dFail.length} discovery check(s) fail: ${labels}`);
+    }
+  }
+}

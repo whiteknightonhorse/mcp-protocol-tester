@@ -51,7 +51,21 @@ const { getMppClient, parseMppChallenge } = require('../lib/mpp-client');
 const { makeX402Payment, getWalletAddress } = require('../lib/x402-client');
 const { mcpRequest } = require('../lib/mcp-client');
 const { getBody, shouldSkip } = require('../utils/assert');
+const { chargeOnce, obtainCredential, sendWithCredential, runMppxValidate } = require('../lib/mpp-pay');
 ```
+
+### Legacy-client lane and `mppx validate` (T-0433)
+
+- `getMppClient(false)` is the current mppx (0.13.x); `getMppClient(true)` is the
+  pinned old client (`"mppx-legacy": "npm:mppx@0.8.19"` in package.json, loaded as
+  `mppx-legacy/client`). Neither client sets `currencies`: the server must pin the
+  currency, the client follows the challenge.
+- `chargeOnce(client, url, headers, body, headerName)` runs probe -> `createCredential`
+  -> send and returns the credential, so a phase can replay it or move it to
+  `Payment-Authorization`.
+- `runMppxValidate(baseUrl, toolId)` runs `mppx validate` as a child process (argv
+  array, no shell, no wallet env, throwaway HOME, scoped by `--endpoint`) and
+  returns the parsed JSON. Treat a spawn failure with `scorer.recCatch`.
 
 ## Conventions
 

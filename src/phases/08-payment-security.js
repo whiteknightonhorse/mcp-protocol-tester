@@ -28,7 +28,31 @@ function expectNotOk(scorer, name, status, det = '') {
 // payment BY DESIGN (escrow-finalize.stage). So a replay that returns 200 is LEGIT iff it was a
 // cache HIT (X-Cache: HIT). A 200 with X-Cache: MISS = a fresh provider call on a replayed payment
 // = real bypass (CRITICAL). Non-200 = blocked outright = pass.
-function expectReplayBlocked(scorer, name, res, det = '') {
+// T-0433: MPP replay answer is a final 403 with error_code credential_replayed
+// (and charged:false). Pass `{ mpp: true }` for a replayed MPP credential; 400
+// stays acceptable only for forged/garbled credentials (`{ mpp: true, forged: true }`).
+async function expectReplayBlocked(scorer, name, res, det = '', opts = {}) {
+  if (opts.mpp) {
+    let json = null;
+    try { json = await res.clone().json(); } catch {}
+    const code = json && json.error_code;
+    if (opts.forged) {
+      const okForged = res.status === 400 || res.status === 401 || res.status === 402 || res.status === 403;
+      scorer.rec(PHASE, name, '400|401|402|403', String(res.status), okForged, det);
+      if (res.status === 200) {
+        scorer.addError('CRITICAL', PHASE, `${name}: server returned 200 for a forged MPP credential`,
+          det, 'Reject forged credentials');
+      }
+      return okForged;
+    }
+    const okMpp = res.status === 403 && code === 'credential_replayed';
+    scorer.rec(PHASE, name, '403 credential_replayed', `${res.status} ${code || '(no error_code)'}`, okMpp, det);
+    if (res.status === 200) {
+      scorer.addError('CRITICAL', PHASE, `${name}: 200 on a replayed MPP credential`,
+        det, 'Reject replayed credentials with 403 credential_replayed');
+    }
+    return okMpp;
+  }
   const xc = (res.headers && res.headers.get ? (res.headers.get('x-cache') || '') : '').toUpperCase();
   const is200 = res.status === 200;
   const ok = !is200 || xc === 'HIT';
@@ -131,7 +155,7 @@ module.exports = async function phase8(scorer, config, context) {
             headers: paidHeaders,
             body: trendingBody,
           });
-          expectReplayBlocked(scorer, '8.1 Replay-same-tool', r2, 'replayed same payment on same tool');
+          await expectReplayBlocked(scorer, '8.1 Replay-same-tool', r2, 'replayed same payment on same tool');
           await drain(r2);
           await sleep(300);
 
@@ -144,7 +168,7 @@ module.exports = async function phase8(scorer, config, context) {
               headers: paidHeaders,
               body: JSON.stringify(getBody(earthquakeTool)),
             });
-            expectReplayBlocked(scorer, '8.1 Replay-cross-tool', r3,
+            await expectReplayBlocked(scorer, '8.1 Replay-cross-tool', r3,
               `replayed payment on ${eqId}`);
             await drain(r3);
           } else {
@@ -159,7 +183,7 @@ module.exports = async function phase8(scorer, config, context) {
             headers: paidHeaders,
             body: JSON.stringify({ modified: true, extra: 'injected' }),
           });
-          expectReplayBlocked(scorer, '8.1 Replay-modified-body', r4,
+          await expectReplayBlocked(scorer, '8.1 Replay-modified-body', r4,
             'replayed payment with tampered body');
           await drain(r4);
         }
@@ -167,6 +191,18 @@ module.exports = async function phase8(scorer, config, context) {
     } catch (e) {
       scorer.rec(PHASE, '8.1 Replay', 'tested', 'error', false, e.message.slice(0, 120));
     }
+  }
+
+  // 8.1b — forged MPP credential (no money moves): must never be served.
+  try {
+    const forged = 'Payment ' + Buffer.from(JSON.stringify({ challenge: { id: 'forged' }, payload: { type: 'transaction', signature: '0x00' } })).toString('base64url');
+    const fr = await sf(`${config.apiUrl}/tools/crypto.trending/call`, {
+      method: 'POST', headers: { ...ZERO_AUTH, 'X-API-Key': ZERO_AUTH.Authorization.replace('Bearer ', ''), Authorization: forged }, body: '{}',
+    });
+    await expectReplayBlocked(scorer, '8.1b Forged-MPP-credential', fr, 'garbled Authorization: Payment credential', { mpp: true, forged: true });
+    await drain(fr);
+  } catch (e) {
+    scorer.recCatch(PHASE, '8.1b Forged-MPP-credential', '400|402', e);
   }
 
   // ========================================================================

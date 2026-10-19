@@ -110,6 +110,30 @@ async function diffTransportProbe(scorer, phase, name, url, opts, undiciTmo = 50
   return curlResult;
 }
 
+// T-0433: raw-path request via curl (--path-as-is). undici/WHATWG URL
+// normalizes `..`, `%2F`-adjacent forms and backslashes before they hit the
+// wire, so path-encoding bypass vectors can only be sent by curl. Returns the
+// status and (capped) body text.
+function curlRawPath(url, opts = {}, tmo = 25000) {
+  return new Promise((resolve) => {
+    const args = ['-sS', '--path-as-is', '-g', '--max-time', String(Math.max(1, Math.ceil(tmo / 1000))),
+      '-w', '\n%{http_code}', '-X', opts.method || 'GET'];
+    for (const [k, v] of Object.entries(withTesterHeader(opts.headers))) args.push('-H', `${k}: ${v}`);
+    if (opts.body !== undefined) args.push('--data-raw', opts.body);
+    args.push(url);
+    execFile('curl', args, { timeout: tmo + 3000, maxBuffer: 2 * 1024 * 1024 }, (err, stdout) => {
+      const out = String(stdout || '');
+      const nl = out.lastIndexOf('\n');
+      const status = parseInt(out.slice(nl + 1), 10);
+      if (!status) {
+        resolve({ status: -1, _timeout: true, body: '', error: (err && err.message) || 'curl produced no status code' });
+        return;
+      }
+      resolve({ status, _timeout: false, body: out.slice(0, nl) });
+    });
+  });
+}
+
 function getDelay(toolId) {
   const p = toolId.split('.')[0];
   const delays = {
@@ -120,4 +144,4 @@ function getDelay(toolId) {
   return delays[p] || 350;
 }
 
-module.exports = { sf, drain, getDelay, setTesterId, withTesterHeader, curlRequest, diffTransportProbe };
+module.exports = { sf, drain, getDelay, setTesterId, withTesterHeader, curlRequest, curlRawPath, diffTransportProbe };

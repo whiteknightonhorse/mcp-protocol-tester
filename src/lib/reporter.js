@@ -73,6 +73,7 @@ function generateReport(scorer, meta) {
   w(`  x402 spent (Base):   $${(meta.spentX402 || 0).toFixed(4)}`);
   w(`  MPP spent (Tempo):   $${(meta.spentMPP || 0).toFixed(4)}`);
   w(`  Total:               $${((meta.spentX402 || 0) + (meta.spentMPP || 0)).toFixed(4)}`);
+  w(`  mppx validate:       ${meta.mppxValidate || 'not run'}`);
 
   // 500 errors — only count failed tests where got is exactly '500' (HTTP status)
   // Exclude passing tests (e.g. catalog-count=500 is a tool count, not HTTP 500)
@@ -151,6 +152,7 @@ function generateReport(scorer, meta) {
     skippedPhases, skipReasons: scorer.skipReasons,
     assertions: { total: scorer.all.length, pass: scorer.pass.length, fail: scorer.fail.length },
     financial: { x402: meta.spentX402 || 0, mpp: meta.spentMPP || 0 },
+    mppxValidate: meta.mppxValidate || null,
     errors: scorer.errors, recommendations: scorer.recommendations,
     blocked: scorer.blockedList || [],
     failures: allFails.map(f => ({ phase: f.phase, name: f.name, expected: f.exp, got: f.got, detail: f.det, red: !!f.red })),

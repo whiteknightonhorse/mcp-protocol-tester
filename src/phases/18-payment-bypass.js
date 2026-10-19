@@ -3,7 +3,7 @@
  * Tests every known vector for getting paid API data without paying.
  * Simulates a malicious AI agent trying to abuse the payment system.
  */
-const { sf, drain, diffTransportProbe } = require('../lib/http');
+const { sf, drain, diffTransportProbe, curlRawPath } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
 const { getX402Client, makeX402Payment } = require('../lib/x402-client');
 
@@ -534,6 +534,65 @@ module.exports = async function phase18(scorer, config, context) {
     `len=${minLen} unique=${uniqueNonces}/${nonces.length}`,
     uniqueNonces === nonces.filter(Boolean).length && minLen >= 20,
     uniqueNonces < nonces.filter(Boolean).length ? 'DUPLICATE NONCES!' : 'good entropy');
+
+  // T-0433 — path-encoding bypass vectors. None of these may serve a paid
+  // tool without payment. Sent with curl --path-as-is because undici
+  // normalizes most of them away. Budget: $0 (no payment is ever signed).
+  console.log('  --- Path-encoding bypass vectors ---');
+  {
+    const ORIGIN = config.apiBaseUrl;
+    const T = 'crypto.trending';
+    const rest = [
+      ['encoded slash %2F', `/api/v1/tools/${T}%2Fcall`],
+      ['encoded backslash %5C', `/api/v1/tools/${T}%5Ccall`],
+      ['raw backslash', `/api/v1/tools/${T}\\call`],
+      ['call/..%2F', `/api/v1/tools/${T}/call/..%2F`],
+      ['double slash', `/api/v1//tools/${T}/call`],
+      ['uppercase /API/v1', `/API/v1/tools/${T}/call`],
+      ['newline %0A', `/api/v1/tools/${T}%0A/call`],
+    ];
+    const mcp = [
+      ['/mcp%2F', '/mcp%2F'],
+      ['/mcp/..', '/mcp/..'],
+    ];
+    const rpc = JSON.stringify({ jsonrpc: '2.0', id: 9001, method: 'tools/call', params: { name: 'crypto.trending.get', arguments: {} } });
+    const offenders = [];
+    for (const [label, path] of rest) {
+      const r = await curlRawPath(`${ORIGIN}${path}`, { method: 'POST', headers: AUTH, body: '{}' });
+      const served = r.status === 200;
+      if (served) offenders.push(label);
+      scorer.recQ(PHASE, `18.X bypass vector ${label}`, '!200', r.status, !served, served ? 'CRITICAL: paid tool served unpaid' : 'not served');
+      await sleep(150);
+    }
+    for (const [label, path] of mcp) {
+      const r = await curlRawPath(`${ORIGIN}${path}`, {
+        method: 'POST',
+        headers: { ...AUTH, Accept: 'application/json, text/event-stream' },
+        body: rpc,
+      });
+      // Only a JSON-RPC tool result with content and no isError is paid data. Any
+      // other 200 (JSON-RPC error, or the public service-info document that
+      // nginx returns after normalizing `/mcp/..` to `/`) serves nothing paid.
+      let isErr = true;
+      if (r.status === 200) {
+        const text = r.body;
+        const dataLines = text.split('\n').filter((l) => l.startsWith('data:'));
+        let parsed = null;
+        for (const l of dataLines) { try { parsed = JSON.parse(l.slice(5).trim()); } catch {} }
+        if (!parsed) { try { parsed = JSON.parse(text); } catch {} }
+        const res = parsed && parsed.result;
+        isErr = !(res && res.isError !== true && Array.isArray(res.content) && res.content.length > 0);
+      }
+      const served = r.status === 200 && !isErr;
+      if (served) offenders.push(label);
+      scorer.recQ(PHASE, `18.X bypass vector ${label}`, '!free data', r.status, !served, served ? 'CRITICAL: paid MCP tool served unpaid' : 'not served');
+      await sleep(150);
+    }
+    const dead = rest.length + mcp.length;
+    scorer.redRec(PHASE, '18.X path-encoding bypass vectors (9) never serve unpaid', '0 served',
+      `${offenders.length}/${dead} served`, offenders.length === 0,
+      offenders.length ? `CRITICAL: ${offenders.join(', ')}` : 'all 9 vectors refused or not found');
+  }
 
   // Summary
   const total = scorer.all.filter(t => t.phase === PHASE).length;

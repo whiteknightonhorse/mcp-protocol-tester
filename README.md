@@ -94,13 +94,13 @@ CONCURRENCY=10 npm test
 |-------|--------------------|-----------------------------------------------------------------------|---------|
 | P0    | Discovery          | Catalog fetch, schema validation, `.well-known/*`, dual-rail detection, internal tool leak check, well-known CORS | $0 |
 | P1    | Infrastructure     | Health, Tempo/Base RPC, USDC + gas balances, facilitator, health info leakage check | $0 |
-| P2    | MPP Challenges     | `WWW-Authenticate: Payment` on all tools + field validation (recipient, amount, chainId) | $0 |
-| P3    | x402 Challenges    | x402 402 body on all tools + field validation (payTo, network, asset, scheme, multi-accept), challenge nonce uniqueness | $0 |
-| P4    | MCP Protocol       | initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation, JSON-RPC error codes, session fixation, oversized payload, ID type handling | $0 |
-| P5    | MPP Payments       | Real Tempo USDC payments via mppx + response content validation       | ~$0.01  |
+| P2    | MPP Challenges     | `WWW-Authenticate: Payment` on all tools + field validation (recipient, amount, chainId) + currency pin (exactly one currency, USDC.e on mainnet / pathUSD on testnet, never OUSD; RED) + challenge id and `expires` | $0 |
+| P3    | x402 Challenges    | x402 402 body on all tools + field validation (payTo, network, asset, scheme, multi-accept), challenge nonce uniqueness, `Cache-Control: no-store` on the 402 of each rail, `maxTimeoutSeconds` == 120 | $0 |
+| P4    | MCP Protocol       | initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation, JSON-RPC error codes, session fixation, oversized payload, ID type handling, paid tool without payment -> `isError` + `_meta["x402/payment-required"]` equal to the HTTP 402 `accepts[]`, x402 payment in `params._meta` -> `_meta["x402/payment-response"]` | ~$0.001 |
+| P5    | MPP Payments       | Real Tempo USDC.e payments via mppx 0.13.5 + response content validation; current-client receipt with tx-hash reference (RED); legacy mppx 0.8.19 client lane; replay of a settled credential is refused (RED) and answered with a final 403 `credential_replayed`, `charged:false` (rec); credential in `Payment-Authorization` next to a Bearer key -> 200; both headers with credentials -> 400; `mppx validate` child process | ~$0.01  |
 | P6    | x402 Payments      | Real Base USDC payments via @x402/core + response content validation   | ~$0.05  |
 | P7    | Basic Security     | Auth bypass, forged credentials, HTTP method enforcement + override bypass, Content-Type manipulation, request ID, path traversal, expanded hidden endpoints (+10), request smuggling | $0 |
-| P8    | Payment Security   | Replay (same/cross-tool), race condition (10 parallel), double-spend, amount manipulation (0/negative/underpay/tampered payTo/integer overflow 2^64), float precision, off-by-one (999 vs 1000), expired challenge, wrong network (testnet→mainnet), cross-rail price consistency | ~$0.01 |
+| P8    | Payment Security   | Replay (same/cross-tool), race condition (10 parallel), double-spend, amount manipulation (0/negative/underpay/tampered payTo/integer overflow 2^64), float precision, off-by-one (999 vs 1000), expired challenge, wrong network (testnet→mainnet), cross-rail price consistency; MPP replay answer is a final 403 `credential_replayed` (400 only for forged credentials) | ~$0.01 |
 | P9    | Advanced Security  | SSRF (AWS/GCP/localhost/file:// + IPv6/octal/decimal), timing attacks, CORS + subdomain confusion + expose-headers audit, header injection (CRLF/64KB/Host), fuzz (null bytes/unicode/JSON bomb/prototype pollution), XXE injection, SSTI payloads, ReDoS, response analysis | $0 |
 | P10   | Resilience         | Brute force (50 keys), XFF + 5 IP spoofing headers bypass, SSL/TLS version + cipher + cert expiry + TLSv1.1 rejection, enumeration, error cascade, referrer-policy, rate limit granularity (per-key) | $0 |
 | P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load, latency p50/p95/p99, ramp-up (1→5→10→25), large body DoS (1MB) | $0 |
@@ -109,19 +109,19 @@ CONCURRENCY=10 npm test
 | P14   | Discover Tools     | Category enumeration (21 cats), category+task combos, stemming, keyword relevance, abuse (SQLi/XSS/unicode/10k chars), truncation, performance | $0 |
 | P15   | Platform Features  | Usage Analytics (account.usage/tools/timeseries), Tool Quality Index (tool_quality/rankings), Batch API (call_batch + REST), recursive batch, batch tool_id injection, cross-feature validation | $0 |
 | P16   | Agent Experience   | Zero-knowledge bootstrap, tool description quality, error actionability (400/402/429), payment UX, response consistency, E2E lifecycle (golden path), MCP protocol completeness, error path leakage | $0 |
-| P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x, cross-rail nonce, cross-chain replay, WebSocket upgrade bypass, burst 50 unpaid, chunked encoding bypass, nonce entropy | ~$0.01 |
+| P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x, cross-rail nonce, cross-chain replay, WebSocket upgrade bypass, burst 50 unpaid, chunked encoding bypass, nonce entropy, 9 path-encoding bypass vectors (`%2F`, `%5C`, raw backslash, `/call/..%2F`, double slash, `/API/v1`, `%0A`, `/mcp%2F`, `/mcp/..`; RED, $0) | ~$0.01 |
 | P18   | CDP Facilitator    | PayAI health + Base mainnet + Bazaar extension, CDP auth-gated, 402 wallet/network/asset/version consistency across tools, MPP dual-rail header, health/catalog/free/paid architecture checks, facilitator TLS, wallet constant | $0 |
 | P19   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
 | P20   | Moderation E2E     | Real trigger content through a real paid call (sacrificial key only), asserts blocked + settle-on-block holds after 90s | ~$0.001 |
 | P21   | Appeals            | /appeals/:id + /api/v1/appeals/:id path-param fuzz (5 hostile values x 2 routes), immediate liveness check after each | $0 |
 | P22   | Balance Rail       | Plain-Bearer call (no x402/MPP header) against a priced tool must pay from balance; balance must actually decrease (sacrificial key only) | varies |
 | P23   | Devices            | device.list/state/command + safety-gate rejection of an out-of-bounds command (sacrificial key only) | $0 |
-| P24   | Docs/Catalog Truth | Every static page's `tools/<id>/call` references cross-checked against the live catalog; homepage tool-count drift; `/about` and `/index.md` (200, content-type, canonical, forbidden phrases) | $0 |
+| P24   | Docs/Catalog Truth | Every static page's `tools/<id>/call` references cross-checked against the live catalog; homepage tool-count drift; `/about` and `/index.md` (200, content-type, canonical, forbidden phrases); payment wording on `/integrator/agent-guide`, `/auth.md`, `/llms.txt`, `/.well-known/x402-payment.json` (`mppx >= 0.6.16`, `USDC.e`, no `coinbase/x402`, no "memo" next to "quote") | $0 |
 | P25   | Time Promises      | Plants a real expiring moderation record, verifies it's actually gone after the real 14-day retention window (sacrificial key only) | ~$0.001 |
 | P26   | Coverage Parity    | Live nginx.conf's declared public locations vs this suite's own probed-route inventory | $0 |
 | P27   | Storefront Surface | Demo shop MCP initialize + tools/list, `/m/<slug>` + agent.json + llms.txt URLs, `/shops`, `/integrator` (+ Markdown negotiation), discover `kind=merchant` vs `/shops` parity (demo mode, GET only) | $0 |
 | P28   | Shop Order Flow    | Demo shop quote for demo-bundle, 402 challenge (amount, x402 payTo is not the platform wallet; MPP recipient is a well-formed address, and for apibase-demo only the not-platform-Tempo check is SKIPPED because its Tempo payout is the operator wallet by design, the stream pilot requires it: docs/integrator.md:94, src/shop/stream-session.ts:187-219; both rails), replay of the same quote -> same binding, amount mismatch -> 402 with the order left QUOTED; pay -> DELIVERED and receipt replay are SKIPPED (no demo settlement, would cost money) | $0 |
-| P29   | Subscriptions      | demo-daily subscribe quote + terms (daily, 72 h window), 402 challenge, refusals (non-subscription SKU, qty 2), 404 on unknown subscription routes; renewal / cancel / double-renew / past_due are SKIPPED (need a paid period 1) | $0 |
+| P29   | Subscriptions      | demo-daily subscribe quote + terms (daily, 72 h window), 402 challenge, refusals (non-subscription SKU, qty 2), 404 on unknown subscription routes; renewal / cancel / double-renew / past_due are SKIPPED (need a paid period 1); when the docs list the `mpp_subscription` pull mode, `shop.subscription.get` must describe it | $0 |
 | P32   | Webhook Signature  | Tester-local HTTP receiver: valid HMAC accepted, wrong secret and tampered body rejected, replayed delivery id ignored, timestamp older than 300 s rejected; scheme from `src/shop/webhook/webhook.service.ts:37-40` | $0 |
 | P34   | Legal 428 Gate     | `/legal/index.json` sha256 vs served bodies; unaccepted-merchant quote gate: machine-readable 428 once a document is past the 30-day re-accept window (before that: not refused) | $0 |
 
@@ -177,7 +177,7 @@ more once P20/P22/P25 are provisioned).
 | P2    | HTTP 402 with `WWW-Authenticate: Payment` header                              |
 | P3    | HTTP 402 with x402 JSON body (`x402Version: 2`, `accepts` array)              |
 | P4    | MCP Streamable HTTP (`POST /mcp`) with initialize, tools/list, tools/call     |
-| P5    | MPP payment verification via `mppx`                                           |
+| P5    | MPP payment verification via `mppx` (server-side `mppx` >= 0.13.5 recommended; clients >= 0.6.16 supported, 0.8.19 tested as the legacy lane) |
 | P6    | x402 payment verification via `@x402/core`                                    |
 | P7-P10| Standard REST API (any MCP server)                                            |
 | P11   | Any HTTP endpoint                                                             |
@@ -332,7 +332,8 @@ mcp-protocol-tester/
 │   ├── lib/
 │   │   ├── config.js              # dotenv + env loader
 │   │   ├── http.js                # HTTP client with timeout + provider delays
-│   │   ├── mpp-client.js          # MPP payment wrapper (mppx)
+│   │   ├── mpp-client.js          # MPP client wrapper (mppx 0.13.5 + legacy 0.8.19 lane)
+│   │   ├── mpp-pay.js             # manual credential flow + `mppx validate` child process
 │   │   ├── x402-client.js         # x402 payment wrapper (@x402/core)
 │   │   ├── mcp-client.js          # MCP JSON-RPC session handler
 │   │   ├── scoring.js             # Score/grade calculator
