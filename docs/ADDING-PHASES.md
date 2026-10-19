@@ -74,6 +74,7 @@ const { chargeOnce, obtainCredential, sendWithCredential, runMppxValidate } = re
 - Use `rec()` for important tests, `recQ()` for bulk scans
 - Always `await drain(r)` after reading response body
 - Always `await sleep(getDelay(toolId))` between tool calls
+- Tool-definition fingerprint contract (T-0500): `definition_sha256 = sha256hex(stable({id, description, input_schema}))`; `stable()` in `src/phases/04-mcp-protocol.js` is the canonical JSON (keys sorted recursively, no whitespace)
 
 ## Э1/Э3 additions (Fable's audit, 2026-09-02)
 
