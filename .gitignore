@@ -27,3 +27,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# T-0510: buyer credential of the Base pull probe
+reports/*.secret.json

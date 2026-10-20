@@ -11,6 +11,9 @@
 // start --rail base: pay period 1 on Base (x402), then sign ONE EIP-3009 authorization for period 2
 //        and store it with shop.subscription.preauthorize; the hourly worker pull renews it.
 //        Report: reports/sub-week-probe-base.json (never the key or a signature).
+// T-0510: the quote of an anonymous buyer returns a buyer_token (bt_...); the subscription belongs to that
+//        identity only (another identity gets 404). It is saved to reports/sub-week-probe-base.secret.json
+//        (mode 600, gitignored, never printed) and sent as the Bearer on pay, get and preauthorize; check reads it.
 // check --rail base: as check, plus the stored authorization status and its tx_hash.
 //
 // start: quote demo-weekly (subscribe:true), assert the terms, pay period 1, read the subscription,
@@ -21,7 +24,7 @@
 // pins the buyer identity; without it the identity is the caller's IP, the same for every call.
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +34,7 @@ export const DEFAULT_BASE = 'https://apibase.pro';
 export const DEFAULT_MAX_USD = 2.0;
 export const REPORT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reports', 'sub-week-probe.json');
 export const REPORT_BASE = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reports', 'sub-week-probe-base.json');
+export const SECRET_BASE = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reports', 'sub-week-probe-base.secret.json');
 export const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
 export const BASE_CHAIN_ID = 8453;
 const HOUR_S = 3600;
@@ -77,15 +81,36 @@ const parse = async (res) => {
   try { return JSON.parse(text); } catch { return { raw: text.slice(0, 200) }; }
 };
 
-function headers(env, json) {
+// T-0510: `token` is the buyer_token the server minted for the anonymous quote (server: quote.service.ts
+// buyer_token, buyer.ts resolveBuyer); it is the only credential of the payer and beats PROBE_API_KEY.
+function headers(env, json, token) {
   const h = {};
   if (json) h['Content-Type'] = 'application/json';
-  if (env.PROBE_API_KEY) h.Authorization = `Bearer ${env.PROBE_API_KEY}`;
+  const bearer = token || env.PROBE_API_KEY;
+  if (bearer) h.Authorization = `Bearer ${bearer}`;
   return h;
 }
 
-export async function getSubscription({ fetchFn, base, env, id }) {
-  const res = await fetchFn(`${base}/api/v1/shop/subscriptions/${id}`, { headers: headers(env, false) });
+const BUYER_TOKEN_RE = /^bt_[0-9a-f]{64}$/;
+
+// Mode 600 file, never printed. Written before anything is paid so a crash after /pay cannot lose it.
+export function saveBuyerCredential(path, data) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
+  chmodSync(path, 0o600);
+}
+
+export function loadBuyerToken(path) {
+  try {
+    const t = JSON.parse(readFileSync(path, 'utf8')).buyer_token;
+    return typeof t === 'string' && BUYER_TOKEN_RE.test(t) ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getSubscription({ fetchFn, base, env, id, token }) {
+  const res = await fetchFn(`${base}/api/v1/shop/subscriptions/${id}`, { headers: headers(env, false, token) });
   const body = await parse(res);
   if (res.status !== 200) throw new Error(`subscription get: HTTP ${res.status} ${JSON.stringify(body).slice(0, 200)}`);
   return body;
@@ -226,7 +251,7 @@ const authView = (sub, periodNo) => (sub.preauthorized_periods || []).find((p) =
 
 // signer: {address, signTypedData(typedData)}; signX402(body402) -> X-PAYMENT header value.
 // authWindowS / authTo / authValue are test seams for the guards; production uses the defaults.
-export async function runStartBase({ fetchFn, signX402, signer, base, env, flags, reportPath = REPORT_BASE, log = console.log, nonceFn = () => `0x${randomBytes(32).toString('hex')}`, authWindowS = 24 * HOUR_S, authTo, authValue }) {
+export async function runStartBase({ fetchFn, signX402, signer, base, env, flags, reportPath = REPORT_BASE, secretPath = SECRET_BASE, log = console.log, nonceFn = () => `0x${randomBytes(32).toString('hex')}`, authWindowS = 24 * HOUR_S, authTo, authValue }) {
   checkGuards({ base, flags, env });
   const qres = await fetchFn(`${base}/api/v1/shop/quotes`, {
     method: 'POST',
@@ -236,6 +261,8 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
   const quote = await parse(qres);
   if (qres.status !== 201 || !quote.quote_id) throw new Error(`quote: HTTP ${qres.status} ${JSON.stringify(quote).slice(0, 200)}`);
   const terms = assertTerms(quote);
+  const token = typeof quote.buyer_token === 'string' && BUYER_TOKEN_RE.test(quote.buyer_token) ? quote.buyer_token : undefined;
+  if (token) saveBuyerCredential(secretPath, { quote_id: quote.quote_id, buyer_token: token, saved_at: new Date().toISOString() });
   checkGuards({ base, flags, env, amount: Number(terms.amount), maxPeriods: terms.max_periods });
   const x = quote.pay?.x402;
   if (!x || typeof x.payTo !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(x.payTo)) throw new Refusal('refused: the quote has no x402 payment on Base');
@@ -245,7 +272,7 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
 
   // Period 1: unpaid POST -> 402 challenge -> it must name the quote's payee and amount -> sign -> pay.
   const payUrl = `${base}/api/v1/shop/quotes/${quote.quote_id}/pay`;
-  const c = await fetchFn(payUrl, { method: 'POST', headers: headers(env, true), body: '{}' });
+  const c = await fetchFn(payUrl, { method: 'POST', headers: headers(env, true, token), body: '{}' });
   const challenge = await parse(c);
   if (c.status !== 402 || !Array.isArray(challenge.accepts) || challenge.accepts.length === 0) {
     throw new Error(`pay challenge: HTTP ${c.status} ${JSON.stringify(challenge).slice(0, 200)}`);
@@ -260,19 +287,19 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
   }
   const pres = await fetchFn(payUrl, {
     method: 'POST',
-    headers: { ...headers(env, true), 'X-PAYMENT': paymentHeaderValue(await signX402(challenge)) },
+    headers: { ...headers(env, true, token), 'X-PAYMENT': paymentHeaderValue(await signX402(challenge)) },
     body: '{}',
   });
   const paid = await parse(pres);
   if (pres.status !== 200 && pres.status !== 201) throw new Error(`pay: HTTP ${pres.status} ${JSON.stringify(paid).slice(0, 200)}`);
   let id = paid.subscription?.id || paid.subscription_id || null;
   if (!id && paid.order_id) {
-    const ores = await fetchFn(`${base}/api/v1/shop/orders/${paid.order_id}`, { headers: headers(env, false) });
+    const ores = await fetchFn(`${base}/api/v1/shop/orders/${paid.order_id}`, { headers: headers(env, false, token) });
     id = (await parse(ores)).subscription?.id || null;
   }
   if (!id) throw new Error('pay succeeded but no subscription id was returned; look the order up by hand');
 
-  const sub = await getSubscription({ fetchFn, base, env, id });
+  const sub = await getSubscription({ fetchFn, base, env, id, token });
   const end = Date.parse(sub.current_period_end);
   if (!Number.isFinite(end)) throw new Error(`subscription has no usable current_period_end: ${sub.current_period_end}`);
   const nextPeriod = sub.period_no + 1;
@@ -290,13 +317,13 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
 
   const pre = await fetchFn(`${base}/api/v1/shop/subscriptions/${id}/preauthorize`, {
     method: 'POST',
-    headers: headers(env, true),
+    headers: headers(env, true, token),
     body: JSON.stringify({ authorizations: [{ period_no: nextPeriod, authorization: auth, signature }] }),
   });
   const preBody = await parse(pre);
   if (pre.status !== 200 && pre.status !== 201) throw new Error(`preauthorize: HTTP ${pre.status} ${JSON.stringify(stripSecrets(preBody)).slice(0, 200)}`);
 
-  const after = await getSubscription({ fetchFn, base, env, id });
+  const after = await getSubscription({ fetchFn, base, env, id, token });
   const out = {
     ...summary(after),
     quote_id: quote.quote_id,
@@ -312,9 +339,9 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
 }
 
 // Returns the exit code: 0 period 2 credited and active, 3 waiting, 1 failed / past_due / anything else.
-export async function runCheckBase({ fetchFn, base, env, reportPath = REPORT_BASE, log = console.log }) {
+export async function runCheckBase({ fetchFn, base, env, reportPath = REPORT_BASE, secretPath = SECRET_BASE, log = console.log }) {
   const saved = JSON.parse(readFileSync(reportPath, 'utf8'));
-  const sub = await getSubscription({ fetchFn, base, env, id: saved.subscription_id });
+  const sub = await getSubscription({ fetchFn, base, env, id: saved.subscription_id, token: loadBuyerToken(secretPath) });
   const a = authView(sub, 2);
   log(JSON.stringify({ ...summary(sub), authorization_status: a?.status ?? null, tx_hash: a?.tx_hash ?? null }));
   if (sub.status === 'active' && sub.period_no === 2) {
@@ -369,7 +396,7 @@ async function main() {
     }
   } catch (e) {
     const msg = String(e?.message || e);
-    process.stderr.write(`${msg.split(env.PROBE_PRIVATE_KEY || '\u0000').join('[redacted]')}\n`);
+    process.stderr.write(`${msg.split(env.PROBE_PRIVATE_KEY || '\u0000').join('[redacted]').replace(/bt_[0-9a-f]{64}/g, '[redacted]')}\n`);
     process.exitCode = e instanceof Refusal ? 2 : 1;
   }
 }

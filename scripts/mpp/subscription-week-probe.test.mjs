@@ -1,13 +1,13 @@
 // node --test scripts/mpp/subscription-week-probe.test.mjs   (mocked HTTP, no network, no real key)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { paymentHeaderValue, runStart, runCheck, checkGuards, assertTerms, Refusal, runStartBase, runCheckBase, buildTypedData, checkAuthorization } from './subscription-week-probe.mjs';
+import { paymentHeaderValue, runStart, runCheck, checkGuards, assertTerms, Refusal, runStartBase, runCheckBase, buildTypedData, checkAuthorization, loadBuyerToken } from './subscription-week-probe.mjs';
 
 const require = createRequire(import.meta.url);
 const { privateKeyToAccount } = require('viem/accounts');
@@ -140,7 +140,7 @@ function baseMock({ quote = BQUOTE, accepts = [ACCEPT], resource = RESOURCE, sub
 const signX402 = async () => ({ 'PAYMENT-SIGNATURE': 'eDQwMi1oZWFkZXI=' });
 const preCalls = (f) => f.calls.filter((c) => c.url.endsWith('/preauthorize'));
 const baseRun = (over = {}) => runStartBase({
-  fetchFn: baseMock(), signX402, signer: ACCOUNT, base: BASE, env: {}, flags: FLAGS, reportPath: tmpReport(), log: () => {}, nonceFn: () => NONCE, ...over,
+  fetchFn: baseMock(), signX402, signer: ACCOUNT, base: BASE, env: {}, flags: FLAGS, reportPath: tmpReport(), secretPath: tmpReport(), log: () => {}, nonceFn: () => NONCE, ...over,
 });
 
 test('base start happy path: pays period 1, stores ONE period-2 authorization, report holds no signature or key', async () => {
@@ -290,4 +290,54 @@ test('T-0509: the X-PAYMENT header sent to /pay is the bare base64 string, not a
   await baseRun({ fetchFn });
   const paid = fetchFn.calls.find((c) => c.url.endsWith('/pay') && c.init.headers?.['X-PAYMENT']);
   assert.equal(paid.init.headers['X-PAYMENT'], 'eDQwMi1oZWFkZXI=');
+});
+
+// ---- T-0510: the probe acts as the buyer identity the quote created -----------------------------------
+const BT = 'bt_' + 'c3'.repeat(32);
+const authOf = (c) => c.init.headers?.Authorization;
+
+test('T-0510: buyer_token from the quote is saved (mode 600) and sent on pay, get and preauthorize', async () => {
+  const secretPath = tmpReport();
+  const fetchFn = baseMock({ quote: { ...BQUOTE, buyer_token: BT } });
+  await baseRun({ fetchFn, secretPath, env: { PROBE_API_KEY: 'other-key' } });
+  assert.equal(JSON.parse(readFileSync(secretPath, 'utf8')).buyer_token, BT);
+  assert.equal(statSync(secretPath).mode & 0o777, 0o600);
+  const after = fetchFn.calls.filter((c) => !c.url.endsWith('/quotes'));
+  assert.ok(after.length >= 4);
+  for (const c of after) assert.equal(authOf(c), `Bearer ${BT}`, c.url);
+});
+
+test('T-0510: the credential is on disk even when /pay fails, and the report and stdout never hold it', async () => {
+  const secretPath = tmpReport();
+  const reportPath = tmpReport();
+  const lines = [];
+  const quote = { ...BQUOTE, buyer_token: BT };
+  const failing = async (url, init = {}) => (url.endsWith('/pay') ? res(500, {}) : baseMock({ quote })(url, init));
+  await assert.rejects(baseRun({ fetchFn: failing, secretPath, reportPath, log: (l) => lines.push(l) }));
+  assert.equal(loadBuyerToken(secretPath), BT);
+  const ok = baseMock({ quote });
+  await baseRun({ fetchFn: ok, secretPath, reportPath, log: (l) => lines.push(l) });
+  assert.equal(lines.join('\n').includes(BT), false);
+  assert.equal(readFileSync(reportPath, 'utf8').includes(BT), false);
+});
+
+test('T-0510: check reuses the saved buyer token, and falls back to PROBE_API_KEY without one', async () => {
+  const reportPath = tmpReport();
+  const secretPath = tmpReport();
+  writeFileSync(reportPath, JSON.stringify({ subscription_id: SUB_ID }));
+  writeFileSync(secretPath, JSON.stringify({ buyer_token: BT }));
+  const seen = [];
+  const fetchFn = async (url, init) => { seen.push(init.headers.Authorization); return res(200, { subscription_id: SUB_ID, status: 'active', period_no: 1, preauthorized_periods: [] }); };
+  const lines = [];
+  await runCheckBase({ fetchFn, base: BASE, env: {}, reportPath, secretPath, log: (l) => lines.push(l) });
+  assert.deepEqual(seen, [`Bearer ${BT}`]);
+  assert.equal(lines.join('\n').includes(BT), false);
+  await runCheckBase({ fetchFn, base: BASE, env: { PROBE_API_KEY: 'k' }, reportPath, secretPath: tmpReport(), log: () => {} });
+  assert.equal(seen[1], 'Bearer k');
+});
+
+test('T-0510: a malformed buyer_token in the quote is ignored, not saved', async () => {
+  const secretPath = tmpReport();
+  await baseRun({ fetchFn: baseMock({ quote: { ...BQUOTE, buyer_token: 'junk' } }), secretPath });
+  assert.equal(loadBuyerToken(secretPath), undefined);
 });
