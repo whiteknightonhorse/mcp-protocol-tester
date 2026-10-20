@@ -58,7 +58,17 @@ async function chargeOnce(client, url, headers, body, headerName = 'Authorizatio
 // Scoped with --endpoint so the run is one unpaid challenge check. The output
 // goes to a temp FILE, not a pipe: the CLI calls process.exit after a failed
 // validation and a pipe is cut at ~256 KB (the discovery report is ~3 MB).
+const TOOL_ID_RE = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+
+function refuseValidate(errMsg) {
+  return { exitCode: -1, spawnFailed: true, json: null, errMsg };
+}
+
 function runMppxValidate(baseUrl, toolId, timeoutMs = 90000) {
+  let parsedUrl = null;
+  try { parsedUrl = new URL(String(baseUrl)); } catch {}
+  if (!parsedUrl || parsedUrl.protocol !== 'https:') return Promise.resolve(refuseValidate('refused: baseUrl must be an https: URL'));
+  if (typeof toolId !== 'string' || !TOOL_ID_RE.test(toolId)) return Promise.resolve(refuseValidate('refused: toolId does not match the allowed pattern'));
   return new Promise((resolve) => {
     const bin = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'mppx');
     const args = ['validate', baseUrl, '--endpoint', `POST:/api/v1/tools/${toolId}/call`, '--body', '{}', '-j'];
