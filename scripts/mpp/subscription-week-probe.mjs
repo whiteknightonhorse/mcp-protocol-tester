@@ -184,6 +184,18 @@ export function buildTypedData(a) {
   };
 }
 
+const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+// T-0509: makeX402Payment returns the x402HTTPClient header OBJECT ({'PAYMENT-SIGNATURE': <base64>});
+// the T-0508 probe put that object into X-PAYMENT, which fetch sent as "[object Object]" and the
+// server's decodePaymentSignatureHeader refused. Accept the object or the bare string, return the
+// base64 value, and refuse anything the server's decoder would reject.
+export function paymentHeaderValue(raw) {
+  const v = raw && typeof raw === 'object' ? (raw['PAYMENT-SIGNATURE'] ?? raw['X-PAYMENT']) : raw;
+  if (typeof v !== 'string' || !B64_RE.test(v)) throw new Refusal('refused: the signed x402 payment is not a base64 header value; not sending it');
+  return v;
+}
+
 const lc = (v) => (typeof v === 'string' ? v.toLowerCase() : v);
 
 // Guards on the authorization itself, run before anything is signed.
@@ -238,6 +250,9 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
   if (c.status !== 402 || !Array.isArray(challenge.accepts) || challenge.accepts.length === 0) {
     throw new Error(`pay challenge: HTTP ${c.status} ${JSON.stringify(challenge).slice(0, 200)}`);
   }
+  if (typeof challenge.resource?.url !== 'string' || challenge.resource.url === '') {
+    throw new Refusal('refused: the 402 challenge carries no resource.url; not signing');
+  }
   for (const a of challenge.accepts) {
     if (lc(a.payTo) !== lc(payTo) || String(a.amount) !== String(x.amount) || a.network !== 'eip155:8453' || lc(a.asset) !== USDC_BASE) {
       throw new Refusal('refused: the 402 challenge differs from the quote (payee, amount, network or asset)');
@@ -245,7 +260,7 @@ export async function runStartBase({ fetchFn, signX402, signer, base, env, flags
   }
   const pres = await fetchFn(payUrl, {
     method: 'POST',
-    headers: { ...headers(env, true), 'X-PAYMENT': await signX402(challenge) },
+    headers: { ...headers(env, true), 'X-PAYMENT': paymentHeaderValue(await signX402(challenge)) },
     body: '{}',
   });
   const paid = await parse(pres);

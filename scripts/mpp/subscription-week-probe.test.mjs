@@ -7,7 +7,7 @@ import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { runStart, runCheck, checkGuards, assertTerms, Refusal, runStartBase, runCheckBase, buildTypedData, checkAuthorization } from './subscription-week-probe.mjs';
+import { paymentHeaderValue, runStart, runCheck, checkGuards, assertTerms, Refusal, runStartBase, runCheckBase, buildTypedData, checkAuthorization } from './subscription-week-probe.mjs';
 
 const require = createRequire(import.meta.url);
 const { privateKeyToAccount } = require('viem/accounts');
@@ -116,15 +116,16 @@ const END = '2026-10-27T05:30:00.000Z';
 const END_S = Math.floor(Date.parse(END) / 1000);
 const NONCE = '0x' + '07'.repeat(32);
 const BQUOTE = { ...QUOTE, pay: { x402: { payTo: PAY_TO, amount: '1000000', network: 'eip155:8453', asset: USDC, extra: { quote_id: 'q-1' } } } };
+const RESOURCE = { url: 'https://apibase.test/api/v1/shop/quotes/q-1/pay', mimeType: 'application/json', description: 'Order payment: quote:q-1' };
 const ACCEPT = { scheme: 'exact', network: 'eip155:8453', amount: '1000000', asset: USDC, payTo: PAY_TO };
 
-function baseMock({ quote = BQUOTE, accepts = [ACCEPT], sub2 = {} } = {}) {
+function baseMock({ quote = BQUOTE, accepts = [ACCEPT], resource = RESOURCE, sub2 = {} } = {}) {
   const calls = [];
   const fn = async (url, init = {}) => {
     calls.push({ url, init });
     if (url.endsWith('/quotes')) return res(201, quote);
     if (url.endsWith('/pay')) {
-      return init.headers?.['X-PAYMENT'] ? res(200, { order_id: 'o-1', subscription: { id: SUB_ID, period_no: 1 } }) : res(402, { accepts });
+      return init.headers?.['X-PAYMENT'] ? res(200, { order_id: 'o-1', subscription: { id: SUB_ID, period_no: 1 } }) : res(402, { accepts, ...(resource ? { resource } : {}) });
     }
     if (url.endsWith('/preauthorize')) return res(201, { subscription_id: SUB_ID, pull_mode: 'base_preauth', preauthorized_periods: [{ period_no: 2, status: 'pending' }] });
     if (url.includes('/subscriptions/')) {
@@ -136,7 +137,7 @@ function baseMock({ quote = BQUOTE, accepts = [ACCEPT], sub2 = {} } = {}) {
   fn.calls = calls;
   return fn;
 }
-const signX402 = async () => 'x402-header';
+const signX402 = async () => ({ 'PAYMENT-SIGNATURE': 'eDQwMi1oZWFkZXI=' });
 const preCalls = (f) => f.calls.filter((c) => c.url.endsWith('/preauthorize'));
 const baseRun = (over = {}) => runStartBase({
   fetchFn: baseMock(), signX402, signer: ACCOUNT, base: BASE, env: {}, flags: FLAGS, reportPath: tmpReport(), log: () => {}, nonceFn: () => NONCE, ...over,
@@ -155,7 +156,7 @@ test('base start happy path: pays period 1, stores ONE period-2 authorization, r
     from: ACCOUNT.address, to: PAY_TO, value: '1000000', validAfter: String(END_S), validBefore: String(END_S + 86400), nonce: NONCE,
   });
   assert.ok(await verifyTypedData({ address: ACCOUNT.address, ...buildTypedData(item.authorization), signature: item.signature }));
-  assert.equal(fetchFn.calls.find((c) => c.url.endsWith('/pay') && c.init.headers?.['X-PAYMENT']).init.headers['X-PAYMENT'], 'x402-header');
+  assert.equal(fetchFn.calls.find((c) => c.url.endsWith('/pay') && c.init.headers?.['X-PAYMENT']).init.headers['X-PAYMENT'], 'eDQwMi1oZWFkZXI=');
   assert.equal(out.stored_authorization.status, 'pending');
   const saved = readFileSync(reportPath, 'utf8');
   assert.equal(JSON.parse(saved).subscription_id, SUB_ID);
@@ -244,4 +245,49 @@ test('base check exit codes and authorization status / tx hash', async () => {
   assert.equal(await run({ status: 'past_due', period_no: 1, preauthorized_periods: [{ period_no: 2, status: 'failed' }] }), 1);
   assert.equal(await run({ status: 'active', period_no: 1, preauthorized_periods: [{ period_no: 2, status: 'failed' }] }), 1);
   assert.equal(await run({ status: 'past_due', period_no: 1, preauthorized_periods: [] }), 1);
+});
+
+// ---- T-0509: the X-PAYMENT value must decode with the server's own decoder ----------------------------
+
+test('T-0509: the real shop /pay 402 fixture signs (throwaway key) into a header the server decoder accepts', async () => {
+  const require = createRequire(import.meta.url);
+  const { decodePaymentSignatureHeader } = require('@x402/core/http');
+  const { generatePrivateKey } = require('viem/accounts');
+  const x402 = require('../../src/lib/x402-client.js');
+  const body402 = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'shop-pay-402.json'), 'utf8'));
+  assert.ok(x402.initX402(generatePrivateKey()));
+  const raw = await x402.makeX402Payment(body402);
+  // The regression: the raw value is an object, not a string; the server decoder refuses its string form.
+  assert.equal(typeof raw, 'object');
+  assert.throws(() => decodePaymentSignatureHeader(String(raw)), /Invalid payment signature header/);
+  const value = paymentHeaderValue(raw);
+  const decoded = decodePaymentSignatureHeader(value);
+  assert.equal(decoded.x402Version, 2);
+  assert.equal(decoded.accepted.payTo, body402.accepts[0].payTo);
+  assert.equal(decoded.payload.authorization.value, body402.accepts[0].amount);
+  assert.equal(decoded.resource.url, body402.resource.url);
+});
+
+test('T-0509: paymentHeaderValue accepts the object or the bare base64, refuses anything else', () => {
+  assert.equal(paymentHeaderValue({ 'PAYMENT-SIGNATURE': 'YWJj' }), 'YWJj');
+  assert.equal(paymentHeaderValue('YWJj'), 'YWJj');
+  for (const bad of [{}, null, undefined, '', '[object Object]', 42, { 'PAYMENT-SIGNATURE': 7 }]) {
+    assert.throws(() => paymentHeaderValue(bad), Refusal);
+  }
+});
+
+test('T-0509: a 402 challenge without resource.url is refused before anything is signed', async () => {
+  for (const resource of [null, { url: '' }]) {
+    let signed = false;
+    const fetchFn = baseMock({ resource });
+    await assert.rejects(baseRun({ fetchFn, signX402: async () => { signed = true; return 'YWJj'; } }), /no resource\.url/);
+    assert.equal(signed, false);
+  }
+});
+
+test('T-0509: the X-PAYMENT header sent to /pay is the bare base64 string, not an object', async () => {
+  const fetchFn = baseMock();
+  await baseRun({ fetchFn });
+  const paid = fetchFn.calls.find((c) => c.url.endsWith('/pay') && c.init.headers?.['X-PAYMENT']);
+  assert.equal(paid.init.headers['X-PAYMENT'], 'eDQwMi1oZWFkZXI=');
 });

@@ -1,0 +1,74 @@
+{
+ "x402Version": 2,
+ "error": "payment_required",
+ "resource": {
+  "url": "https://apibase.pro/api/v1/shop/quotes/0956a8bc-a309-49e8-bdf4-c69d06294c9c/pay",
+  "mimeType": "application/json",
+  "description": "Order payment: quote:0956a8bc-a309-49e8-bdf4-c69d06294c9c"
+ },
+ "resource_id": "quote:0956a8bc-a309-49e8-bdf4-c69d06294c9c",
+ "accepts": [
+  {
+   "scheme": "exact",
+   "network": "eip155:8453",
+   "amount": "1000000",
+   "maxAmountRequired": "1000000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "payTo": "0x54f0358fb619b254d4b1f6de635180623eb47932",
+   "maxTimeoutSeconds": 120,
+   "extra": {
+    "name": "USD Coin",
+    "version": "2",
+    "quote_id": "0956a8bc-a309-49e8-bdf4-c69d06294c9c"
+   }
+  }
+ ],
+ "extensions": {
+  "payment-identifier": {
+   "info": {
+    "required": false
+   },
+   "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+     "required": {
+      "type": "boolean"
+     },
+     "id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+     }
+    },
+    "required": [
+     "required"
+    ]
+   }
+  }
+ },
+ "request_id": "1844b417034c83991d0aee77de331bb6",
+ "error_code": "payment_required",
+ "suggested_action": "add_payment",
+ "documentation_url": "https://apibase.pro/integrator/docs#quotes",
+ "price_usd": "1",
+ "min_balance_usd": "1",
+ "payment_address": "0x54f0358fb619b254d4b1f6de635180623eb47932",
+ "price_version": 1,
+ "message": "Payment required: sign an exact x402 authorization for the quoted amount and payee.",
+ "pay": {
+  "x402": {
+   "payTo": "0x54f0358fb619b254d4b1f6de635180623eb47932",
+   "amount": "1000000",
+   "network": "eip155:8453",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "extra": {
+    "quote_id": "0956a8bc-a309-49e8-bdf4-c69d06294c9c"
+   }
+  },
+  "mpp": {
+   "url": "https://apibase.pro/api/v1/shop/quotes/0956a8bc-a309-49e8-bdf4-c69d06294c9c/pay"
+  }
+ }
+}
