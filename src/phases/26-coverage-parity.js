@@ -55,6 +55,12 @@ const PROBED_PREFIXES = [
   // T-0348: probed by P27 (/m/, /shops, /integrator), P34 (/legal) and P24
   // 24.4 (/about, /index.md). Data only; the parity logic is untouched.
   '/m/', '/shops', '/legal', '/integrator', '/about', '/index.md',
+  // T-0512: exact asset location, real probe in 26.5 below (a stylesheet
+  // is not covered by STATIC_ASSET_RE, and every static page links it).
+  '/assets/site-m.css',
+  // T-0512: A-GA-01 receipts (/r/) and A-GA-02 attest page (/attest*) went
+  // live after the daily run; real probes in 26.5 below.
+  '/r/', '/attest',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every
@@ -224,6 +230,43 @@ module.exports = async function phase26(scorer, config, context) {
         `${r.status} -> ${loc || '(none)'}`, ok);
     } catch (e) {
       scorer.recCatch(PHASE, `26.4 ${probe.path} slash-canonical redirect`, `301 -> ${probe.location}`, e);
+    }
+  }
+
+  // 26.5 — shared stylesheet (T-0512). Every static page links
+  // /assets/site-m.css; a wrong status/content-type (nginx falling through to
+  // the app, an HTML error page) silently unstyles the whole site, and the
+  // immutable cache header is how the site serves it (cache-busted by name).
+  try {
+    const r = await sf(`${config.apiBaseUrl}/assets/site-m.css`);
+    const ct = r.headers?.get?.('content-type') || '';
+    const cc = r.headers?.get?.('cache-control') || '';
+    const body = await (async () => { try { return await r.text(); } catch { return ''; } })();
+    const ok = r.status === 200 && ct.includes('text/css') && /max-age=\d+/.test(cc) && body.length > 0;
+    scorer.rec(PHASE, '26.5 /assets/site-m.css stylesheet', '200 text/css + max-age cache + non-empty',
+      `${r.status} ${ct.split(';')[0]} ${cc || '(no cache-control)'} ${body.length}b`, ok);
+  } catch (e) {
+    scorer.recCatch(PHASE, '26.5 /assets/site-m.css stylesheet', '200 text/css + max-age cache', e);
+  }
+
+  // A-GA-02 attest page: canonical redirect, page, bundled script.
+  const attestProbes = [
+    { path: '/attest', status: 301, ct: null },
+    { path: '/attest/', status: 200, ct: 'text/html' },
+    { path: '/attest/attest.js', status: 200, ct: 'javascript' },
+    // A-GA-01 receipts: an unknown receipt id must be a JSON 404, not an HTML page or a 5xx.
+    { path: '/r/00000000-0000-0000-0000-000000000000.json', status: 404, ct: 'json' },
+  ];
+  for (const probe of attestProbes) {
+    try {
+      const r = await sf(`${config.apiBaseUrl}${probe.path}`, { redirect: 'manual' });
+      const ct = r.headers?.get?.('content-type') || '';
+      await drain(r);
+      const ok = r.status === probe.status && (!probe.ct || ct.includes(probe.ct));
+      scorer.rec(PHASE, `26.5 ${probe.path}`, `${probe.status} ${probe.ct || ''}`.trim(),
+        `${r.status} ${ct.split(';')[0]}`, ok);
+    } catch (e) {
+      scorer.recCatch(PHASE, `26.5 ${probe.path}`, `${probe.status} ${probe.ct || ''}`.trim(), e);
     }
   }
 
