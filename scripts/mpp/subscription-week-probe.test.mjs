@@ -6,7 +6,12 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runStart, runCheck, checkGuards, assertTerms, Refusal } from './subscription-week-probe.mjs';
+import { createRequire } from 'node:module';
+import { runStart, runCheck, checkGuards, assertTerms, Refusal, runStartBase, runCheckBase, buildTypedData, checkAuthorization } from './subscription-week-probe.mjs';
+
+const require = createRequire(import.meta.url);
+const { privateKeyToAccount } = require('viem/accounts');
+const { verifyTypedData } = require('viem');
 
 const BASE = 'https://apibase.pro';
 const FLAGS = ['--i-am-the-dispatcher'];
@@ -99,4 +104,144 @@ test('the signing key is never logged', () => {
   });
   assert.notEqual(r.status, 0);
   assert.equal((r.stdout + r.stderr).includes('cd'.repeat(32)), false);
+});
+
+// ---- T-0508: Base pull mode (mocked HTTP; the signer is a throwaway test key, not a wallet) --------
+
+const TEST_KEY = '0x' + '11'.repeat(32);
+const ACCOUNT = privateKeyToAccount(TEST_KEY);
+const PAY_TO = '0x1234567890abcdef1234567890abcdef12345678';
+const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+const END = '2026-10-27T05:30:00.000Z';
+const END_S = Math.floor(Date.parse(END) / 1000);
+const NONCE = '0x' + '07'.repeat(32);
+const BQUOTE = { ...QUOTE, pay: { x402: { payTo: PAY_TO, amount: '1000000', network: 'eip155:8453', asset: USDC, extra: { quote_id: 'q-1' } } } };
+const ACCEPT = { scheme: 'exact', network: 'eip155:8453', amount: '1000000', asset: USDC, payTo: PAY_TO };
+
+function baseMock({ quote = BQUOTE, accepts = [ACCEPT], sub2 = {} } = {}) {
+  const calls = [];
+  const fn = async (url, init = {}) => {
+    calls.push({ url, init });
+    if (url.endsWith('/quotes')) return res(201, quote);
+    if (url.endsWith('/pay')) {
+      return init.headers?.['X-PAYMENT'] ? res(200, { order_id: 'o-1', subscription: { id: SUB_ID, period_no: 1 } }) : res(402, { accepts });
+    }
+    if (url.endsWith('/preauthorize')) return res(201, { subscription_id: SUB_ID, pull_mode: 'base_preauth', preauthorized_periods: [{ period_no: 2, status: 'pending' }] });
+    if (url.includes('/subscriptions/')) {
+      const stored = calls.some((c) => c.url.endsWith('/preauthorize'));
+      return res(200, { subscription_id: SUB_ID, status: 'active', period_no: 1, current_period_end: END, next_charge_at: END, pull_mode: stored ? 'base_preauth' : 'none', preauthorized_periods: stored ? [{ period_no: 2, status: 'pending' }] : [], ...sub2 });
+    }
+    return res(404, {});
+  };
+  fn.calls = calls;
+  return fn;
+}
+const signX402 = async () => 'x402-header';
+const preCalls = (f) => f.calls.filter((c) => c.url.endsWith('/preauthorize'));
+const baseRun = (over = {}) => runStartBase({
+  fetchFn: baseMock(), signX402, signer: ACCOUNT, base: BASE, env: {}, flags: FLAGS, reportPath: tmpReport(), log: () => {}, nonceFn: () => NONCE, ...over,
+});
+
+test('base start happy path: pays period 1, stores ONE period-2 authorization, report holds no signature or key', async () => {
+  const reportPath = tmpReport();
+  const fetchFn = baseMock();
+  const out = await baseRun({ fetchFn, reportPath });
+  assert.equal(preCalls(fetchFn).length, 1);
+  const body = JSON.parse(preCalls(fetchFn)[0].init.body);
+  assert.equal(body.authorizations.length, 1);
+  const [item] = body.authorizations;
+  assert.equal(item.period_no, 2);
+  assert.deepEqual(item.authorization, {
+    from: ACCOUNT.address, to: PAY_TO, value: '1000000', validAfter: String(END_S), validBefore: String(END_S + 86400), nonce: NONCE,
+  });
+  assert.ok(await verifyTypedData({ address: ACCOUNT.address, ...buildTypedData(item.authorization), signature: item.signature }));
+  assert.equal(fetchFn.calls.find((c) => c.url.endsWith('/pay') && c.init.headers?.['X-PAYMENT']).init.headers['X-PAYMENT'], 'x402-header');
+  assert.equal(out.stored_authorization.status, 'pending');
+  const saved = readFileSync(reportPath, 'utf8');
+  assert.equal(JSON.parse(saved).subscription_id, SUB_ID);
+  assert.equal(saved.includes(item.signature), false);
+  assert.equal(saved.includes('11'.repeat(32)), false);
+});
+
+test('base typed data equals an independently built EIP-712 fixture', () => {
+  const a = { from: ACCOUNT.address, to: PAY_TO, value: '1000000', validAfter: '1792000000', validBefore: '1792086400', nonce: NONCE };
+  const fixture = {
+    domain: { name: 'USD Coin', version: '2', chainId: 8453, verifyingContract: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' },
+    types: {
+      TransferWithAuthorization: [
+        { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+        { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+      ],
+    },
+    primaryType: 'TransferWithAuthorization',
+    message: { from: a.from, to: a.to, value: 1000000n, validAfter: 1792000000n, validBefore: 1792086400n, nonce: NONCE },
+  };
+  assert.deepEqual(buildTypedData(a), fixture);
+});
+
+test('base guard: to differs from the quote payout wallet', async () => {
+  const fetchFn = baseMock();
+  await assert.rejects(baseRun({ fetchFn, authTo: '0x' + 'aa'.repeat(20) }), Refusal);
+  assert.equal(preCalls(fetchFn).length, 0);
+});
+
+test('base guard: value differs from price x 1e6', async () => {
+  const fetchFn = baseMock();
+  await assert.rejects(baseRun({ fetchFn, authValue: '1000001' }), Refusal);
+  assert.equal(preCalls(fetchFn).length, 0);
+});
+
+test('base guard: validBefore - validAfter outside 1..72 h', async () => {
+  for (const authWindowS of [3599, 72 * 3600 + 1]) {
+    const fetchFn = baseMock();
+    await assert.rejects(baseRun({ fetchFn, authWindowS }), Refusal);
+    assert.equal(preCalls(fetchFn).length, 0);
+  }
+  await baseRun({ authWindowS: 3600 });
+  await baseRun({ authWindowS: 72 * 3600 });
+});
+
+test('base guard: period_no other than 2, and more than one authorization', async () => {
+  const fetchFn = baseMock({ sub2: { period_no: 2 } }); // already at period 2 -> the next would be 3
+  await assert.rejects(baseRun({ fetchFn }), Refusal);
+  assert.equal(preCalls(fetchFn).length, 0);
+  const auth = { to: PAY_TO, value: '1000000', validAfter: '1', validBefore: '86401' };
+  assert.throws(() => checkAuthorization({ auth, periodNo: 2, expectedTo: PAY_TO, price: 1, count: 2 }), Refusal);
+  assert.doesNotThrow(() => checkAuthorization({ auth, periodNo: 2, expectedTo: PAY_TO, price: 1 }));
+});
+
+test('base guard: a 402 challenge that differs from the quote is never signed', async () => {
+  let signed = false;
+  const fetchFn = baseMock({ accepts: [{ ...ACCEPT, payTo: '0x' + 'bb'.repeat(20) }] });
+  await assert.rejects(baseRun({ fetchFn, signX402: async () => { signed = true; return 'h'; } }), Refusal);
+  assert.equal(signed, false);
+});
+
+test('base guards: dispatcher flag, PROBE_MAX_USD, quote without x402', async () => {
+  await assert.rejects(baseRun({ flags: [] }), Refusal);
+  await assert.rejects(baseRun({ env: { PROBE_MAX_USD: '1.99' } }), Refusal);
+  await assert.rejects(baseRun({ fetchFn: baseMock({ quote: QUOTE }) }), Refusal);
+});
+
+test('CLI: start --rail base without the dispatcher flag refuses; unknown rail is a usage error', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, 'start', '--rail', 'base'], { encoding: 'utf8', env: { PATH: process.env.PATH, ['PROBE_' + 'PRIVATE_KEY']: TEST_KEY } });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /refused: .*mainnet/);
+  assert.equal((r.stdout + r.stderr).includes('11'.repeat(32)), false);
+  assert.equal(spawnSync(process.execPath, [SCRIPT, 'check', '--rail', 'solana'], { encoding: 'utf8' }).status, 2);
+});
+
+test('base check exit codes and authorization status / tx hash', async () => {
+  const reportPath = tmpReport();
+  writeFileSync(reportPath, JSON.stringify({ subscription_id: SUB_ID }));
+  const tx = '0x' + 'ab'.repeat(32);
+  const lines = [];
+  const run = (sub, log = () => {}) => runCheckBase({ fetchFn: async () => res(200, { subscription_id: SUB_ID, ...sub }), base: BASE, env: {}, reportPath, log });
+  assert.equal(await run({ status: 'active', period_no: 2, preauthorized_periods: [{ period_no: 2, status: 'settled', tx_hash: tx }] }, (l) => lines.push(l)), 0);
+  assert.ok(lines.join('\n').includes(tx));
+  assert.equal(await run({ status: 'active', period_no: 1, preauthorized_periods: [{ period_no: 2, status: 'pending' }] }), 3);
+  assert.equal(await run({ status: 'active', period_no: 1, preauthorized_periods: [{ period_no: 2, status: 'submitted' }] }), 3);
+  assert.equal(await run({ status: 'past_due', period_no: 1, preauthorized_periods: [{ period_no: 2, status: 'failed' }] }), 1);
+  assert.equal(await run({ status: 'active', period_no: 1, preauthorized_periods: [{ period_no: 2, status: 'failed' }] }), 1);
+  assert.equal(await run({ status: 'past_due', period_no: 1, preauthorized_periods: [] }), 1);
 });
