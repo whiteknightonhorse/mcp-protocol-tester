@@ -13,9 +13,15 @@ A run's VERDICT is FAIL, independent of how high the score is, if any of:
   mppx client pays and returns a `Payment-Receipt` with a tx-hash reference, P5
   settled-credential replay is refused (never 200; the exact final 403
   `credential_replayed` answer is a non-RED rec), P17 nine path-encoding bypass vectors never serve unpaid;
+- a failing assertion has been in the standing-red ledger (`reports/standing-reds.json`) for 3 days or more (rule a), red flag or not; the reason names each one with its `owner` (a task id, `prod` for a server bug, or UNASSIGNED) and lists the unowned ones;
+- a BLOCKED check belongs to a money phase (rule b): every phase whose Cost column in [PHASES.md](PHASES.md) is not $0, plus P17, P28 and P29;
+- `MAX_TOOLS` is above 0 (rule c): the catalog was sliced and most tools were not tested;
+- `catalog-complete` is red (rule d): the catalog loaded is not the catalog the server reports;
 - more than 6 phases were SKIPped (a skip must always state a reason —
   `scorer.skip(phase, reason)` — but too many of them isn't a trustworthy
   PASS either).
+
+The report prints `coverage: executed X of Y assertions, blocked B, skipped phases S` on its second line, so a score of 100 is always read next to what was not executed. `scripts/test-verdict.js` (part of `npm test`) pins rules (a)-(d).
 
 A timeout/dead-server response is a real, distinct, NEVER-passing state —
 see `src/lib/scoring.js` and `src/lib/http.js`'s `-1` sentinel. `run-daily.sh`

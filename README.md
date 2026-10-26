@@ -90,6 +90,8 @@ CONCURRENCY=10 npm test
 | F     | <60     | Major failures, not production-ready     |
 
 > **Note:** Any CRITICAL (500) server error automatically caps the grade at D. Skipped phases score 0%.
+>
+> **The score is a trend metric; the VERDICT gates.** A run can score 100 and still FAIL (standing reds, blocked money checks, a truncated catalog). The rules are stated once in [docs/SCORING.md](docs/SCORING.md#verdict-layer-e1-read-this-first).
 
 ## Phases
 
@@ -152,7 +154,7 @@ more once the sacrificial-key phases are provisioned).
 | `CONCURRENCY`     | No       | `5`                                 | Parallel requests in load test       |
 | `SKIP_PAYMENTS`   | No       | `false` in code, `true` in the shipped example file | `true`: no wallet is loaded and no phase spends |
 | `PHASES`          | No       | unset = all phases                  | Comma-separated phase numbers        |
-| `MAX_TOOLS`       | No       | `0` (all)                           | Max tools to test (0 = unlimited)    |
+| `MAX_TOOLS`       | No       | `0` (all)                           | Max tools to test (0 = unlimited); a value above 0 truncates the catalog and makes the verdict FAIL |
 | `TIMEOUT_MS`      | No       | `30000`                             | Per-request timeout in ms            |
 | `MAX_USDC_BUDGET` | No       | `0.25`                              | Spending cap per protocol            |
 

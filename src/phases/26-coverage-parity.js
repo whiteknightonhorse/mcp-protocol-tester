@@ -153,7 +153,8 @@ module.exports = async function phase26(scorer, config, context) {
   const realProbes = [
     { path: '/api', expectStatus: [402], expectJson: true },
     { path: '/api/v1', expectStatus: [402], expectJson: true },
-    { path: '/onboard', expectStatus: [200], expectJson: true },
+    // T-0563: /onboard is an HTML page; its JSON twin needs Accept: application/json and is not documented anywhere, so not asserted.
+    { path: '/onboard', expectStatus: [200], expectCt: 'text/html' },
     { path: '/openapi.json', expectStatus: [200], expectJson: true },
     // T-0222 (2026-09-28, TESTER-reds-0928.ruling-1 §1): machine-readable
     // contract docs — isitagentready's authMd check reads /auth.md with

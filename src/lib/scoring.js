@@ -1,4 +1,23 @@
+const fs = require('fs');
+const path = require('path');
 const { isDeadServerError } = require('./net-error');
+const PHASE_META = require('./phase-meta');
+
+const STANDING_RED_MAX_AGE_DAYS = 3;
+const DEFAULT_LEDGER_PATH = path.join(__dirname, '..', '..', 'reports', 'standing-reds.json');
+// Money phases: every phase whose Cost column (phase-meta.js) is not $0, plus
+// P17/P28/P29, whose paid steps are reported as BLOCKED when not exercised.
+const EXTRA_MONEY_PHASES = ['P17', 'P28', 'P29'];
+function moneyPhases() {
+  const ids = Object.keys(PHASE_META).filter((id) => PHASE_META[id].cost !== '$0');
+  return new Set([...ids, ...EXTRA_MONEY_PHASES]);
+}
+
+function loadLedger(p) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return {}; }
+}
+
+function ageDays(from, to) { return Math.round((new Date(to) - new Date(from)) / 86400000); }
 
 // Sanitize any string before logging — removes secrets, tokens, keys, long JSON
 function sanitize(str) {
@@ -194,14 +213,53 @@ class Scorer {
         [...this.skippedPhases].map(p => `${p} (${this.skipReasons[p] || 'no reason given'})`).join('; '));
     }
 
+    // (a) a failing assertion in the standing-red ledger for 3+ days, red flag or not
+    const ledger = opts.ledger || loadLedger(opts.ledgerPath || process.env.STANDING_REDS_PATH || DEFAULT_LEDGER_PATH);
+    const today = opts.today || new Date().toISOString().slice(0, 10);
+    const standing = [];
+    for (const f of this.all.filter(t => !t.ok)) {
+      const e = ledger[`${f.phase}|${f.name}`];
+      if (!e || !e.first_seen) continue;
+      const age = ageDays(e.first_seen, today);
+      if (age >= STANDING_RED_MAX_AGE_DAYS) {
+        const owner = e.owner && e.owner !== 'UNASSIGNED' ? e.owner : null;
+        standing.push({ sig: `${f.phase}|${f.name}`, age, owner });
+      }
+    }
+    if (standing.length) {
+      const unowned = standing.filter(s => !s.owner);
+      reasons.push(`${standing.length} standing red(s) ${STANDING_RED_MAX_AGE_DAYS}+ days old: ` +
+        standing.map(s => `${s.sig} (${s.age}d, owner ${s.owner || 'UNASSIGNED'})`).join('; ') +
+        (unowned.length ? ` | unowned: ${unowned.map(s => s.sig).join('; ')}` : ''));
+    }
+
+    // (b) a BLOCKED check inside a phase that moves money
+    const money = moneyPhases();
+    const blockedMoney = this.blockedList.filter(b => money.has(b.phase));
+    if (blockedMoney.length) {
+      reasons.push(`${blockedMoney.length} BLOCKED check(s) in money phases: ` +
+        blockedMoney.map(b => `${b.phase}/${b.name} (${b.world})`).join('; '));
+    }
+
+    // (c) catalog truncated by MAX_TOOLS
+    const maxTools = opts.maxTools ?? parseInt(process.env.MAX_TOOLS || '0', 10);
+    if (maxTools > 0) reasons.push(`catalog truncated: MAX_TOOLS=${maxTools} slices the catalog, most tools were not tested`);
+
+    // (d) catalog-complete red
+    const incomplete = this.all.filter(t => t.name === 'catalog-complete' && !t.ok);
+    if (incomplete.length) reasons.push(`catalog-complete red: ${incomplete.map(t => t.det || t.got).join('; ')}`);
+
+    const executed = this.all.length;
+    const blocked = this.blockedList.length;
     return {
       verdict: reasons.length ? 'FAIL' : 'PASS',
       reasons,
       redFailCount: redFails.length,
       criticalCount: critical.length,
       skippedCount,
+      coverage: { executed, total: executed + blocked, blocked, skippedPhases: skippedCount },
     };
   }
 }
 
-module.exports = { Scorer, sanitize };
+module.exports = { Scorer, sanitize, moneyPhases };

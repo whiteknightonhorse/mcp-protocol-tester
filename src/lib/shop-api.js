@@ -3,6 +3,7 @@
  * shop only, no payment is ever signed: every helper here either reads, creates
  * an unpaid quote, or cancels one.
  */
+const crypto = require('crypto');
 const { sf } = require('./http');
 
 const SLUG = 'apibase-demo';
@@ -23,14 +24,21 @@ async function call(config, method, path, body, headers) {
   return { status: r.status, headers: r.headers, text, json };
 }
 
-function createQuote(config, sku, extra, idemKey) {
-  const headers = idemKey ? { 'X-Idempotency-Key': idemKey } : undefined;
+// Buyer identity: the server derives it from `Authorization: Bearer bt_<64 hex>` (src/shop/buyer.ts);
+// without it the identity is the caller IP, which is not stable across requests behind the proxy chain,
+// so a quote and its cancel could belong to two different buyers. One token per phase run.
+function newBuyerToken() { return `bt_${crypto.randomBytes(32).toString('hex')}`; }
+const buyerHeaders = (buyer) => (buyer ? { Authorization: `Bearer ${buyer}` } : {});
+
+function createQuote(config, sku, extra, idemKey, buyer) {
+  const headers = { ...buyerHeaders(buyer), ...(idemKey ? { 'X-Idempotency-Key': idemKey } : {}) };
   return call(config, 'POST', '/quotes', { merchant: SLUG, items: [{ sku, qty: 1 }], ...(extra || {}) }, headers);
 }
 
 // A QUOTED order is voided for free; used so the run leaves no open quote behind.
-function cancelOrder(config, orderId) {
-  return call(config, 'POST', `/orders/${orderId}/cancel`, { reason: 'mcp-protocol-tester' });
+// `buyer` must be the token that created the quote; another buyer's order answers 404 by design.
+function cancelOrder(config, orderId, buyer) {
+  return call(config, 'POST', `/orders/${orderId}/cancel`, { reason: 'mcp-protocol-tester' }, buyerHeaders(buyer));
 }
 
 function decodeB64Json(s) {
@@ -68,5 +76,5 @@ function wrongAmountPayment(quoteId, payTo, micro) {
 }
 
 module.exports = {
-  SLUG, PLATFORM_BASE, PLATFORM_TEMPO, call, createQuote, cancelOrder, decodeB64Json, parseMppChallenge, wrongAmountPayment,
+  SLUG, PLATFORM_BASE, PLATFORM_TEMPO, call, createQuote, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
 };

@@ -22,10 +22,11 @@ const NO_SUB = '00000000-0000-4000-8000-000000000000';
 module.exports = async function phase29(scorer, config, context) {
   console.log('\n--- Phase 29: Subscriptions (demo-daily, $0) ---');
   await mppSubscriptionMode(scorer, config, context);
+  const buyer = shop.newBuyerToken();
   let quote = null;
 
   try {
-    const q = await shop.createQuote(config, SKU, { subscribe: true });
+    const q = await shop.createQuote(config, SKU, { subscribe: true }, undefined, buyer);
     quote = q.json;
     const ok = q.status === 201 && !!quote?.quote_id;
     scorer.rec(PHASE, '29.1 POST /quotes demo-daily subscribe:true', '201 + quote_id', `${q.status} ${quote?.quote_id || '(none)'}`, ok);
@@ -54,7 +55,7 @@ module.exports = async function phase29(scorer, config, context) {
 
   // 29.3 — refusals.
   try {
-    const noSub = await shop.createQuote(config, 'demo-bundle', { subscribe: true });
+    const noSub = await shop.createQuote(config, 'demo-bundle', { subscribe: true }, undefined, buyer);
     scorer.rec(PHASE, '29.3 subscribe:true on a non-subscription SKU', '422 validation_failed',
       `${noSub.status} ${noSub.json?.error}`, noSub.status === 422 && noSub.json?.error === 'validation_failed');
     const two = await shop.call(config, 'POST', '/quotes', { merchant: shop.SLUG, items: [{ sku: SKU, qty: 2 }], subscribe: true });
@@ -95,7 +96,9 @@ module.exports = async function phase29(scorer, config, context) {
 
   if (quote) {
     try {
-      const c = await shop.cancelOrder(config, quote.order_id);
+      const foreign = await shop.cancelOrder(config, quote.order_id, shop.newBuyerToken());
+      scorer.rec(PHASE, '29.6 cancel with a foreign buyer identity', '404 (not your order)', String(foreign.status), foreign.status === 404);
+      const c = await shop.cancelOrder(config, quote.order_id, buyer);
       scorer.rec(PHASE, '29.6 cancel the unpaid subscribe order (free)', '200 CANCELLED', `${c.status} ${c.json?.state}`, c.status === 200 && c.json?.state === 'CANCELLED');
     } catch (e) {
       scorer.recCatch(PHASE, '29.6 cancel unpaid order', '200', e);

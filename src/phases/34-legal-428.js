@@ -2,7 +2,8 @@
  * Phase 34 — Legal registry integrity + terms-gate 428 contract (T-0348).
  *
  * 34.1 /legal/index.json sha256 values must match the bytes actually served.
- * 34.2 A merchant that has not accepted the current documents is refused on a
+ * 34.2 (T-0563: the probe shop opus-test-shop is deactivated and answers 410 merchant_unavailable before the
+ *      terms gate; the 428 body check is BLOCKED while that holds.) A merchant that has not accepted the current documents is refused on a
  *      gated path (quote creation) with a machine-readable 428.
  *
  * Correction to the card text, found by reading src/shop/auth/terms.guard.ts:
@@ -97,24 +98,26 @@ module.exports = async function phase34(scorer, config) {
     const registry = index.filter((d) => d.registry !== false && d.effective_from);
     const now = Date.now();
     const overdue = registry.filter((d) => now - Date.parse(d.effective_from) > WINDOW_MS);
-    const firstOverdue = registry.map((d) => Date.parse(d.effective_from) + WINDOW_MS).sort((a, b) => a - b)
-      .find((t) => t > now);
 
     const demo = await quoteProbe(config, ACCEPTED_SLUG);
     scorer.rec(PHASE, `34.2 control: ${ACCEPTED_SLUG} (accepted) is not gated`, 'not 428/410',
       String(demo.status), demo.status !== 428 && demo.status !== 410);
 
     const t = await quoteProbe(config, UNACCEPTED_SLUG);
-    if (overdue.length > 0) {
+    // T-0563: opus-test-shop is deactivated; the live answer is 410 merchant_unavailable, and that gate
+    // runs before the terms gate, so the 428 contract is not reachable through this shop.
+    const gone = t.status === 410;
+    scorer.rec(PHASE, `34.2 ${UNACCEPTED_SLUG} deactivated shop is refused with 410 merchant_unavailable`, '410 merchant_unavailable',
+      `${t.status} ${t.body?.error_code || '(no error_code)'}`, gone && t.body?.error_code === 'merchant_unavailable',
+      'the deactivated-merchant gate answers before the terms gate');
+    if (overdue.length > 0 && gone) {
+      scorer.blocked(PHASE, `34.2 ${UNACCEPTED_SLUG} without current acceptance -> 428 machine-readable`, 'merchant-deactivated',
+        `overdue docs: ${overdue.map((d) => d.doc_id).join(', ')}; the probe shop answers 410 before the terms gate, so the 428 body cannot be checked`);
+    } else if (overdue.length > 0) {
       const bad = t.status === 428 ? check428Body(t.body, index) : [`status ${t.status}`];
       scorer.redRec(PHASE, `34.2 ${UNACCEPTED_SLUG} without current acceptance -> 428 machine-readable`, '428 + docs[] matching index',
         t.status === 428 && bad.length === 0 ? '428 ok' : bad.join('; '), t.status === 428 && bad.length === 0,
         `overdue docs: ${overdue.map((d) => d.doc_id).join(', ')}`);
-    } else {
-      scorer.rec(PHASE, `34.2 ${UNACCEPTED_SLUG} inside the 30-day re-accept window is not refused`, 'not 428/410',
-        String(t.status), t.status !== 428 && t.status !== 410 && t.status < 500,
-        `428 contract not reachable yet: first document goes overdue ${firstOverdue ? new Date(firstOverdue).toISOString() : 'n/a'}; ` +
-        'from then this probe requires the 428 body');
     }
   } catch (e) {
     scorer.recCatch(PHASE, '34.2 terms gate', '428 or window pass-through', e);

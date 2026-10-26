@@ -20,9 +20,13 @@ function expectStatus(scorer, name, expected, actual, det = '') {
 module.exports = async function phase7(scorer, config, context) {
   console.log('\n--- Phase 7: Security ---');
 
-  const toolUrl = context.catalog.length > 0
-    ? `${config.apiUrl}/tools/${context.catalog[0].id || context.catalog[0].name}/call`
-    : `${config.apiUrl}/tools/crypto.market.trending/call`;
+  // T-0563: `{}` must reach the payment gate, so the probe tool is the first priced catalog tool whose
+  // input schema has no required property (a required-param tool answers 400 before 402).
+  const hasRequired = (t) => !!(t.input_schema && Array.isArray(t.input_schema.required) && t.input_schema.required.length);
+  const toolId = (t) => t.id || t.name;
+  const freeOfArgs = context.catalog.find((t) => !hasRequired(t) && (t.pricing?.price_usd ?? 0) > 0);
+  const requiredTool = context.catalog.find(hasRequired);
+  const toolUrl = `${config.apiUrl}/tools/${freeOfArgs ? toolId(freeOfArgs) : 'crypto.trending'}/call`;
   const postOpts = (headers = {}) => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
@@ -33,6 +37,13 @@ module.exports = async function phase7(scorer, config, context) {
   const r1 = await sf(toolUrl, postOpts());
   expectStatus(scorer, 'no-auth-rejected', [401, 402, 403], r1.status, 'no credentials');
   await drain(r1);
+
+  // 1b. Separate labelled check: a tool with a required parameter rejects `{}` with 400 before the payment gate.
+  if (requiredTool) {
+    const r1b = await sf(`${config.apiUrl}/tools/${toolId(requiredTool)}/call`, postOpts());
+    expectStatus(scorer, 'required-param-tool-empty-body-400', 400, r1b.status, `${toolId(requiredTool)} with {} (validation precedes 402)`);
+    await drain(r1b);
+  }
 
   // 2. Invalid API key -> 401
   const r2 = await sf(toolUrl, postOpts({ 'X-API-Key': 'test_' + 'x'.repeat(20) }));

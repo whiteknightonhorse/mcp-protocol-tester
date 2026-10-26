@@ -38,18 +38,22 @@ function generateReport(scorer, meta) {
   w('='.repeat(76));
 
   const { pts, total, grade, bp, skippedPhases } = scorer.computeGrade(WEIGHTS);
-  const verdict = scorer.computeVerdict(meta.verdictOpts || {});
+  const verdict = scorer.computeVerdict({ maxTools: require('./config').maxTools, ...(meta.verdictOpts || {}) });
 
   w(`\nServer: ${meta.serverUrl} | Tools: ${meta.toolCount || '?'}`);
+  const cv = verdict.coverage;
+  w(`coverage: executed ${cv.executed} of ${cv.total} assertions, blocked ${cv.blocked}, skipped phases ${cv.skippedPhases}`);
   w(`Assertions: ${scorer.all.length} | Pass: ${scorer.pass.length} | Fail: ${scorer.fail.length}`);
 
   // Э1 — the verdict comes first and loudest. Score is a trend line; this is
   // what gates alerting and CI exit code.
   w(''); hr(); w(`VERDICT: ${verdict.verdict}`); hr();
+  w('  Rules: (a) no failing assertion in the standing-red ledger for 3+ days; (b) no BLOCKED check in a money phase;');
+  w('         (c) MAX_TOOLS unset or 0 (catalog not truncated); (d) catalog-complete green. See docs/SCORING.md.');
   if (verdict.verdict === 'FAIL') {
     for (const r of verdict.reasons) w(`  - ${r}`);
   } else {
-    w('  No RED-class failures, no CRITICAL errors, skip count within policy.');
+    w('  No RED-class failures, no CRITICAL errors, skip count within policy, rules (a)-(d) hold.');
   }
 
   w(''); hr(); w('SCORING'); hr();

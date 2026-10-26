@@ -25,11 +25,12 @@ const PRICE_MICRO = '5000000';
 module.exports = async function phase28(scorer, config) {
   console.log('\n--- Phase 28: Shop order flow (demo shop, $0) ---');
   const idem = `tester-p28-${crypto.randomUUID()}`;
+  const buyer = shop.newBuyerToken();
   let quote = null;
 
   // 28.1 — quote.
   try {
-    const q = await shop.createQuote(config, SKU, undefined, idem);
+    const q = await shop.createQuote(config, SKU, undefined, idem, buyer);
     quote = q.json;
     const ok = q.status === 201 && !!quote?.quote_id && !!quote?.order_id;
     scorer.rec(PHASE, '28.1 POST /quotes demo-bundle', '201 + quote_id + order_id', `${q.status} ${quote?.quote_id || '(none)'}`, ok);
@@ -79,7 +80,7 @@ module.exports = async function phase28(scorer, config) {
     }
 
     // 28.3 — replay of the same quote -> same binding.
-    const again = await shop.createQuote(config, SKU, undefined, idem);
+    const again = await shop.createQuote(config, SKU, undefined, idem, buyer);
     scorer.rec(PHASE, '28.3 replay POST /quotes, same Idempotency-Key', 'same quote_id and order_id',
       `${again.status} ${again.json?.quote_id}`, again.json?.quote_id === qid && again.json?.order_id === quote.order_id);
     const got = await shop.call(config, 'GET', `/quotes/${qid}`);
@@ -116,7 +117,9 @@ module.exports = async function phase28(scorer, config) {
 
   // Cleanup: void the unpaid quote.
   try {
-    const c = await shop.cancelOrder(config, quote.order_id);
+    const foreign = await shop.cancelOrder(config, quote.order_id, shop.newBuyerToken());
+    scorer.rec(PHASE, '28.6 cancel with a foreign buyer identity', '404 (not your order)', String(foreign.status), foreign.status === 404);
+    const c = await shop.cancelOrder(config, quote.order_id, buyer);
     scorer.rec(PHASE, '28.6 cancel the unpaid order (free)', '200 CANCELLED', `${c.status} ${c.json?.state}`, c.status === 200 && c.json?.state === 'CANCELLED');
   } catch (e) {
     scorer.recCatch(PHASE, '28.6 cancel unpaid order', '200', e);
