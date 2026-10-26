@@ -57,6 +57,13 @@ const file = [{ address: W.toLowerCase(), label: 'x' }, { address: '0x46f110b1ad
   check('receipt: URL', e2e.receiptId('https://apibase.pro/r/abc12345XYZ.json') === 'abc12345XYZ');
   check('receipt: absent', e2e.receiptId(null) === null);
 
+  // Target slug (E2E_SHOP_SLUG)
+  const shop = require('../src/lib/shop-api');
+  check('slug: unset -> apibase-demo', shop.resolveSlug(undefined) === 'apibase-demo');
+  check('slug: custom slug accepted', shop.resolveSlug('my-shop-2') === 'my-shop-2');
+  check('slug: path traversal falls back', shop.resolveSlug('../x') === 'apibase-demo');
+  check('slug: empty falls back', shop.resolveSlug('') === 'apibase-demo');
+
   // Spend ledger
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spend-'));
   const when = new Date('2026-10-26T06:00:00Z');

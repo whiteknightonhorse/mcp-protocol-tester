@@ -6,7 +6,12 @@
 const crypto = require('crypto');
 const { sf } = require('./http');
 
-const SLUG = 'apibase-demo';
+const DEFAULT_SLUG = 'apibase-demo';
+// E2E_SHOP_SLUG picks the target merchant; anything that is not a plain slug falls back to the default.
+function resolveSlug(v) {
+  return typeof v === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(v) ? v : DEFAULT_SLUG;
+}
+const SLUG = resolveSlug(process.env.E2E_SHOP_SLUG);
 // Platform-owned wallets (see P03 / P19 / P02): a merchant must never be paid to one of them.
 const PLATFORM_BASE = '0x50EbDa9dA5dC19c302Ca059d7B9E06e264936480';
 const PLATFORM_TEMPO = '0x9E29FF84B0f3EDa9756262d2F950C435495BA8cC';
@@ -76,5 +81,5 @@ function wrongAmountPayment(quoteId, payTo, micro) {
 }
 
 module.exports = {
-  SLUG, PLATFORM_BASE, PLATFORM_TEMPO, base: shopBase, call, createQuote, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
+  SLUG, DEFAULT_SLUG, resolveSlug, PLATFORM_BASE, PLATFORM_TEMPO, base: shopBase, call, createQuote, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
 };

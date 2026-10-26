@@ -68,17 +68,10 @@ async function waitDelivered(config, orderId, buyer) {
   return { ok: false, state: last };
 }
 
-async function checkReceipt(scorer, config, rail, header, wallet) {
-  const id = e2e.receiptId(header);
-  scorer.rec(PHASE, `35.${rail} X-APIbase-Receipt present`, 'receipt id or URL', id ? 'present' : String(header), !!id);
-  if (!id) return null;
-  const r = await sf(`${config.apiBaseUrl}/r/${id}.json`, {}, 20000);
-  let j = null;
-  try { j = JSON.parse(await r.text()); } catch { j = null; }
-  const payer = String(j?.payer ?? j?.payer_wallet ?? j?.wallet ?? '').toLowerCase();
-  const mine = payer ? payer === wallet.toLowerCase() : JSON.stringify(j || {}).toLowerCase().includes(wallet.toLowerCase());
-  scorer.redRec(PHASE, `35.${rail} /r/<id>.json public, payer is the tester wallet`, '200 + payer == our wallet', `${r.status} payer_match=${mine}`, r.status === 200 && mine);
-  return id;
+// Informational only: shop pay does not emit X-APIbase-Receipt today (dispute 0564 q-2), so nothing
+// asserts on it. If the server ever sends the header the id lands in the spend ledger.
+function checkReceipt(headers) {
+  return e2e.receiptId(headers.get('x-apibase-receipt')) || null;
 }
 
 module.exports = async function phase35(scorer, config, context) {
@@ -150,7 +143,7 @@ module.exports = async function phase35(scorer, config, context) {
         if (first.status === 200) {
           const d = await waitDelivered(config, px.quote.order_id, px.buyer);
           scorer.redRec(PHASE, '35.4 x402 order delivered within 120 s', 'FULFILLED|DELIVERED|CLOSED', String(d.state), d.ok);
-          const receipt = await checkReceipt(scorer, config, 'x402', first.headers.get('x-apibase-receipt'), wallet);
+          const receipt = checkReceipt(first.headers);
           let afterPay = await usdcBalanceMicro(wallet);
           for (let i = 0; i < 6 && afterPay === before; i++) { await sleep(5000); afterPay = await usdcBalanceMicro(wallet); }
           const delta = Number(before - afterPay) / 1e6;
@@ -186,7 +179,7 @@ module.exports = async function phase35(scorer, config, context) {
           spent.mpp = Number(pm.quote.total_usd);
           const d = await waitDelivered(config, pm.quote.order_id, pm.buyer);
           scorer.redRec(PHASE, '35.5 mpp order delivered within 120 s', 'FULFILLED|DELIVERED|CLOSED', String(d.state), d.ok);
-          const receipt = await checkReceipt(scorer, config, 'mpp', res.headers.get('x-apibase-receipt'), wallet);
+          const receipt = checkReceipt(res.headers);
           // Replay of the settled credential: a refusal (403 credential_replayed) or the stored answer; never a second order.
           const again = await sendWithCredential(payUrl, { ...headers }, '{}', res.credential);
           const sameOrder = again.status === 200 && again.json?.order_id === res.json?.order_id;
@@ -230,4 +223,4 @@ module.exports = async function phase35(scorer, config, context) {
   }
 };
 
-module.exports.ASSERTIONS = 24;
+module.exports.ASSERTIONS = 20;

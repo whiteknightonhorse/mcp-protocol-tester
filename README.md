@@ -141,7 +141,7 @@ sacrificial/test identity (`MODERATION_TEST_API_KEY`, `BALANCE_RAIL_TEST_KEY`,
 `DEVICE_TEST_API_KEY` — see `.env.example`) and SKIP cleanly without one;
 they never fall back to the primary `API_KEY`.
 
-**First-party daily purchase (P35, $0.05/day cap, receipts public, wallet listed as internal).** P35 buys the $0.01 `__apibase_test` SKU of the demo shop `apibase-demo` once on x402 (Base) and once on MPP (Tempo) with the tester's own wallet, checks delivery, the public receipt (`/r/<id>.json`, payer = the tester wallet), idempotent replay (the wallet balance moves once) and the cancel of an unpaid quote. It spends only with `SKIP_PAYMENTS=false` **and** `E2E_SHOP_PAID=true`, and only while the signer is listed in APIbase `config/autopilot/internal-wallets.json` on `main` (checked every run; otherwise the phase is SKIP with the reason). The planned spend is checked against the $0.05 cap before the first payment and again after the run; each run appends `spent_usd` per rail to `reports/spend-YYYYMM.tsv`. The webhook step is BLOCKED while there is no `E2E_MERCHANT_KEY` and no public receiver.
+**First-party daily purchase (P35, $0.05/day cap, receipts public, wallet listed as internal).** P35 buys the $0.01 `__apibase_test` SKU of the demo shop `apibase-demo` once on x402 (Base) and once on MPP (Tempo) with the tester's own wallet, checks delivery, idempotent replay (the wallet balance moves once) and the cancel of an unpaid quote. The target shop is `E2E_SHOP_SLUG` (default `apibase-demo`). The shop pay response carries no `X-APIbase-Receipt` yet, so the phase asserts nothing on receipts and records the receipt id in the ledger only if the header appears. It spends only with `SKIP_PAYMENTS=false` **and** `E2E_SHOP_PAID=true`, and only while the signer is listed in APIbase `config/autopilot/internal-wallets.json` on `main` (checked every run; otherwise the phase is SKIP with the reason). The planned spend is checked against the $0.05 cap before the first payment and again after the run; each run appends `spent_usd` per rail to `reports/spend-YYYYMM.tsv`. The webhook step is BLOCKED while there is no `E2E_MERCHANT_KEY` and no public receiver.
 
 **Total estimated cost** with `SKIP_PAYMENTS=false`: ~$0.07 per full run; $0 with `SKIP_PAYMENTS=true` (the shipped default) (plus a few tenths of a cent
 more once the sacrificial-key phases are provisioned).
@@ -160,6 +160,9 @@ more once the sacrificial-key phases are provisioned).
 | `MAX_TOOLS`       | No       | `0` (all)                           | Max tools to test (0 = unlimited); a value above 0 truncates the catalog and makes the verdict FAIL |
 | `TIMEOUT_MS`      | No       | `30000`                             | Per-request timeout in ms            |
 | `MAX_USDC_BUDGET` | No       | `0.25`                              | Spending cap per protocol            |
+| `E2E_SHOP_PAID`   | No       | unset                               | `true` lets P35 spend (needs `SKIP_PAYMENTS=false`); anything else: P35 runs quote and cancel only |
+| `E2E_SHOP_SLUG`   | No       | `apibase-demo`                      | Merchant slug the shop phases (P28, P29, P35) target |
+| `E2E_MERCHANT_KEY`| No       | (none)                              | Merchant key for the P35 webhook step; without it the step is BLOCKED |
 
 > \* `PRIVATE_KEY` is required by every phase whose Cost column is not $0. The same key works on both Base and Tempo chains.
 
