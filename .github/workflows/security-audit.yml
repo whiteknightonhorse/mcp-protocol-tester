@@ -81,7 +81,9 @@ jobs:
       - name: Check for private keys
         run: |
           echo "Scanning for hardcoded private keys in src/..."
-          FOUND=$(grep -rn "0x[0-9a-fA-F]\{64\}" src/ || true)
+          # Exempt only the public ERC-20 Transfer(address,address,uint256) event
+          # topic (keccak256 of the signature, not a key) in src/lib/shop-e2e.js.
+          FOUND=$(grep -rn "0x[0-9a-fA-F]\{64\}" src/ | grep -v "TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'" || true)
           if [ -n "$FOUND" ]; then
             echo "::error::Found potential private key in source code!"
             echo "$FOUND"
