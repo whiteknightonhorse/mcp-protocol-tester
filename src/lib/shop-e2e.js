@@ -55,20 +55,58 @@ function capVerdict(spentX402, spentMPP, cap = SPEND_CAP_USD) {
   return { total, ok: total <= cap };
 }
 
-// Same payment, same idempotency key -> same order, same receipt, and the wallet balance did not move on the replay.
-// `balances` are micro-USDC values read after the first pay and after the replay.
-function assertIdempotent(first, replay, balances) {
+// Repeat of the pay request WITHOUT a payment header by the same buyer: pay.service answers 200 `already_placed`
+// with the same order, and the wallet balance (micro-USDC, read after the first pay and after the repeat) does not move.
+function assertAlreadyPlaced(first, repeat, balances) {
+  const problems = [];
+  if (!first || !repeat) return { ok: false, problems: ['missing first or repeat response'] };
+  if (repeat.status !== 200) problems.push(`repeat status ${repeat.status}`);
+  if (repeat.body_status !== 'already_placed') problems.push(`repeat status field ${repeat.body_status}`);
+  if (!first.order_id || repeat.order_id !== first.order_id) problems.push('order_id differs');
+  problems.push(...balanceProblems(balances));
+  return { ok: problems.length === 0, problems };
+}
+
+// Replay of the same signed payment: the stored answer (200, same order) or a refusal (402/403/409); never a second
+// order and never a second transfer.
+function assertReplaySafe(first, replay, balances) {
   const problems = [];
   if (!first || !replay) return { ok: false, problems: ['missing first or replay response'] };
-  if (replay.status !== 200) problems.push(`replay status ${replay.status}`);
-  if (first.order_id && replay.order_id !== first.order_id) problems.push('order_id differs');
-  if (first.receipt && replay.receipt !== first.receipt) problems.push('receipt differs');
-  if (balances) {
-    const afterPay = BigInt(balances.afterPay);
-    const afterReplay = BigInt(balances.afterReplay);
-    if (afterReplay !== afterPay) problems.push(`second transfer: balance moved ${afterPay} -> ${afterReplay}`);
-  }
+  const same = replay.status === 200 && !!first.order_id && replay.order_id === first.order_id;
+  if (!same && ![402, 403, 409].includes(replay.status)) problems.push(`replay status ${replay.status}${replay.status === 200 ? ' with a different order' : ''}`);
+  problems.push(...balanceProblems(balances));
   return { ok: problems.length === 0, problems };
+}
+
+function balanceProblems(balances) {
+  if (!balances) return [];
+  const afterPay = BigInt(balances.afterPay);
+  const afterReplay = BigInt(balances.afterReplay);
+  return afterReplay !== afterPay ? [`second transfer: balance moved ${afterPay} -> ${afterReplay}`] : [];
+}
+
+// order.events[] must show a transition into PAID and a later one into a delivered state.
+function eventsProof(events) {
+  if (!Array.isArray(events)) return { ok: false, why: 'no events[]' };
+  const paid = events.findIndex((e) => e && e.to_state === 'PAID');
+  if (paid < 0) return { ok: false, why: 'no transition into PAID' };
+  const delivered = events.findIndex((e, i) => i > paid && e && DELIVERED_STATES.has(e.to_state));
+  return delivered < 0 ? { ok: false, why: 'no delivered transition after PAID' } : { ok: true };
+}
+
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// Base tx receipt (viem shape): the USDC Transfer log must have `from` equal to the signer address.
+function transferFromSigner(txReceipt, signer) {
+  if (!txReceipt || !Array.isArray(txReceipt.logs) || typeof signer !== 'string') return { ok: false, why: 'no logs' };
+  const want = signer.toLowerCase();
+  for (const l of txReceipt.logs) {
+    if (!l || String(l.address).toLowerCase() !== USDC_BASE.toLowerCase()) continue;
+    const t = l.topics || [];
+    if (String(t[0]).toLowerCase() !== TRANSFER_TOPIC || typeof t[1] !== 'string') continue;
+    if (`0x${t[1].slice(-40)}`.toLowerCase() === want) return { ok: true };
+  }
+  return { ok: false, why: 'no USDC Transfer log from the signer' };
 }
 
 // Receipt header is a bare id or a URL containing /r/<id>.
@@ -94,5 +132,5 @@ function appendSpendLedger(rows, dir, now = new Date()) {
 
 module.exports = {
   SPEND_CAP_USD, TEST_SKU, INTERNAL_WALLETS_URL, USDC_BASE, DELIVERED_STATES,
-  paidGate, parseInternalWallets, isInternalWallet, capPreflight, capVerdict, assertIdempotent, receiptId, appendSpendLedger,
+  paidGate, parseInternalWallets, isInternalWallet, capPreflight, capVerdict, assertAlreadyPlaced, assertReplaySafe, eventsProof, transferFromSigner, receiptId, appendSpendLedger,
 };

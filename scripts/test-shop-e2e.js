@@ -42,15 +42,40 @@ const file = [{ address: W.toLowerCase(), label: 'x' }, { address: '0x46f110b1ad
   check('post-run: 0.02 ok', e2e.capVerdict(0.01, 0.01).ok);
   check('post-run: 0.06 over cap', !e2e.capVerdict(0.03, 0.03).ok);
 
-  // Idempotency assertion with a mocked rail: balances in micro-USDC
-  const first = { order_id: 'o1', receipt: 'rcpt1' };
-  check('idem: same order, same receipt, balance unchanged', e2e.assertIdempotent(first, { status: 200, order_id: 'o1', receipt: 'rcpt1' }, { afterPay: 990000n, afterReplay: 990000n }).ok);
-  const dbl = e2e.assertIdempotent(first, { status: 200, order_id: 'o1', receipt: 'rcpt1' }, { afterPay: 990000n, afterReplay: 980000n });
-  check('idem: second transfer detected', !dbl.ok && /second transfer/.test(dbl.problems.join()));
-  check('idem: different receipt detected', !e2e.assertIdempotent(first, { status: 200, order_id: 'o1', receipt: 'rcpt2' }, { afterPay: 1n, afterReplay: 1n }).ok);
-  check('idem: different order detected', !e2e.assertIdempotent(first, { status: 200, order_id: 'o2', receipt: 'rcpt1' }, { afterPay: 1n, afterReplay: 1n }).ok);
-  check('idem: replay 500 detected', !e2e.assertIdempotent(first, { status: 500 }, { afterPay: 1n, afterReplay: 1n }).ok);
-  check('idem: missing replay detected', !e2e.assertIdempotent(first, null, null).ok);
+  // Idempotency with a mocked rail: balances in micro-USDC
+  const first = { order_id: 'o1' };
+  const ap = (o, b) => e2e.assertAlreadyPlaced(first, { status: 200, body_status: 'already_placed', order_id: 'o1', ...o }, b || { afterPay: 990000n, afterReplay: 990000n });
+  check('placed: 200 already_placed, same order, balance unchanged', ap({}).ok);
+  check('placed: second transfer detected', /second transfer/.test(ap({}, { afterPay: 990000n, afterReplay: 980000n }).problems.join()));
+  check('placed: different order detected', !ap({ order_id: 'o2' }).ok);
+  check('placed: status field not already_placed detected', !ap({ body_status: 'paid' }).ok);
+  check('placed: 500 detected', !ap({ status: 500 }).ok);
+  check('placed: missing repeat detected', !e2e.assertAlreadyPlaced(first, null, null).ok);
+  const rs = (r, b) => e2e.assertReplaySafe(first, r, b || { afterPay: 1n, afterReplay: 1n });
+  check('replay: 200 same order ok', rs({ status: 200, order_id: 'o1' }).ok);
+  check('replay: 402 refusal ok', rs({ status: 402 }).ok);
+  check('replay: 403 refusal ok', rs({ status: 403 }).ok);
+  check('replay: 409 refusal ok', rs({ status: 409 }).ok);
+  check('replay: 200 different order is a failure', !rs({ status: 200, order_id: 'o2' }).ok);
+  check('replay: 500 is a failure', !rs({ status: 500 }).ok);
+  check('replay: refusal but balance moved is a failure', !rs({ status: 402 }, { afterPay: 5n, afterReplay: 4n }).ok);
+
+  // Order events
+  const ev = (...t) => t.map((to_state, i) => ({ seq: i, to_state }));
+  check('events: PAID then FULFILLED', e2e.eventsProof(ev('QUOTED', 'PAID', 'FULFILLED')).ok);
+  check('events: PAID then CLOSED', e2e.eventsProof(ev('PAID', 'CLOSED')).ok);
+  check('events: no PAID', !e2e.eventsProof(ev('QUOTED', 'FULFILLED')).ok);
+  check('events: delivered before PAID only', !e2e.eventsProof(ev('FULFILLED', 'PAID')).ok);
+  check('events: not an array', !e2e.eventsProof(undefined).ok);
+
+  // Transfer-log payer check with a mocked reader result
+  const pad = (a) => `0x${'0'.repeat(24)}${a.slice(2).toLowerCase()}`;
+  const log = (from, addr = e2e.USDC_BASE) => ({ address: addr, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', pad(from), pad('0x46f110b1ad8195ac1e59366149dfc39e3a88638b')] });
+  check('transfer: from == signer (mixed case)', e2e.transferFromSigner({ logs: [log(W)] }, W).ok);
+  check('transfer: other payer refused', !e2e.transferFromSigner({ logs: [log('0x1111111111111111111111111111111111111111')] }, W).ok);
+  check('transfer: right payer on a non-USDC contract refused', !e2e.transferFromSigner({ logs: [log(W, '0x2222222222222222222222222222222222222222')] }, W).ok);
+  check('transfer: no logs refused', !e2e.transferFromSigner({ logs: [] }, W).ok);
+  check('transfer: null receipt refused', !e2e.transferFromSigner(null, W).ok);
 
   // Receipt id extraction
   check('receipt: bare id', e2e.receiptId('abc12345XYZ') === 'abc12345XYZ');

@@ -62,16 +62,33 @@ async function waitDelivered(config, orderId, buyer) {
   while (Date.now() < end) {
     const o = await shop.call(config, 'GET', `/orders/${orderId}`, undefined, { Authorization: `Bearer ${buyer}` });
     last = o.json?.state;
-    if (e2e.DELIVERED_STATES.has(last)) return { ok: true, state: last };
+    if (e2e.DELIVERED_STATES.has(last)) return { ok: true, state: last, view: o.json };
     await sleep(3000);
   }
-  return { ok: false, state: last };
+  return { ok: false, state: last, view: null };
 }
 
-// Informational only: shop pay does not emit X-APIbase-Receipt today (dispute 0564 q-2), so nothing
+// Informational only: shop pay does not emit X-APIbase-Receipt today (dispute 0564 q-2, ruling-3), so nothing
 // asserts on it. If the server ever sends the header the id lands in the spend ledger.
 function checkReceipt(headers) {
   return e2e.receiptId(headers.get('x-apibase-receipt')) || null;
+}
+
+async function txReceipt(txHash) {
+  const { createPublicClient, http } = require('viem');
+  const { base } = require('viem/chains');
+  return createPublicClient({ chain: base, transport: http() }).getTransactionReceipt({ hash: txHash });
+}
+
+// What the order view exposes in place of a public receipt (ruling-3 R1): tx_hash in the pay body and the order view,
+// `fulfillment` for the payer (the server adds it only when the bearer identity is the payer), events PAID -> delivered.
+function checkOrderView(scorer, label, payJson, view) {
+  const payTx = payJson?.order?.tx_hash || payJson?.tx_hash;
+  scorer.redRec(PHASE, `${label} tx_hash in pay body and order view`, 'present in both', `pay=${!!payTx} view=${!!view?.tx_hash}`, !!payTx && !!view?.tx_hash);
+  scorer.redRec(PHASE, `${label} order view returns fulfillment to the payer`, 'fulfillment present', view?.fulfillment === undefined ? 'absent' : 'present', view?.fulfillment !== undefined && view?.fulfillment !== null);
+  const ev = e2e.eventsProof(view?.events);
+  scorer.redRec(PHASE, `${label} events[] PAID then delivered`, 'PAID -> delivered', ev.ok ? 'ok' : ev.why, ev.ok);
+  return view?.tx_hash || payTx || null;
 }
 
 module.exports = async function phase35(scorer, config, context) {
@@ -144,20 +161,30 @@ module.exports = async function phase35(scorer, config, context) {
           const d = await waitDelivered(config, px.quote.order_id, px.buyer);
           scorer.redRec(PHASE, '35.4 x402 order delivered within 120 s', 'FULFILLED|DELIVERED|CLOSED', String(d.state), d.ok);
           const receipt = checkReceipt(first.headers);
+          const txHash = checkOrderView(scorer, '35.4 x402', first.json, d.view);
+          if (txHash) {
+            const tr = await txReceipt(txHash).catch((e) => ({ error: e.message }));
+            const payer = e2e.transferFromSigner(tr, wallet);
+            scorer.redRec(PHASE, '35.4 x402 USDC Transfer log payer is our wallet', 'Transfer from signer', payer.ok ? 'ok' : (payer.why || tr.error), payer.ok);
+          }
           let afterPay = await usdcBalanceMicro(wallet);
           for (let i = 0; i < 6 && afterPay === before; i++) { await sleep(5000); afterPay = await usdcBalanceMicro(wallet); }
           const delta = Number(before - afterPay) / 1e6;
           spent.x402 = delta > 0 ? delta : Number(px.quote.total_usd);
           scorer.redRec(PHASE, '35.4 x402 balance delta is the quote price once', `$${px.quote.total_usd}`, `$${delta}`, Math.abs(delta - Number(px.quote.total_usd)) < 1e-6);
-          // Same signed payload, same key: same answer, no second transfer.
+          // Repeat without a payment header, same buyer and key: 200 already_placed, same order, no second transfer.
+          const firstId = { order_id: first.json?.order_id };
+          const again = await postJson(payUrl, bearer);
+          const afterAgain = await usdcBalanceMicro(wallet);
+          const placed = e2e.assertAlreadyPlaced(firstId, { status: again.status, body_status: again.json?.status, order_id: again.json?.order_id }, { afterPay, afterReplay: afterAgain });
+          scorer.redRec(PHASE, '35.4 x402 repeat without payment: already_placed, same order, no second transfer', '200 already_placed',
+            placed.ok ? 'already_placed' : placed.problems.join('; '), placed.ok);
+          // Same signed payload again: the stored answer or a refusal, never a second order or transfer.
           const replay = await postJson(payUrl, { ...bearer, 'X-PAYMENT': header });
           const afterReplay = await usdcBalanceMicro(wallet);
-          const idem = e2e.assertIdempotent(
-            { order_id: first.json?.order_id, receipt: e2e.receiptId(first.headers.get('x-apibase-receipt')) },
-            { status: replay.status, order_id: replay.json?.order_id, receipt: e2e.receiptId(replay.headers.get('x-apibase-receipt')) },
-            { afterPay, afterReplay });
-          scorer.redRec(PHASE, '35.4 x402 replay with the same key: same receipt, no second transfer', 'same order + receipt, balance unchanged',
-            idem.ok ? 'idempotent' : idem.problems.join('; '), idem.ok);
+          const safe = e2e.assertReplaySafe(firstId, { status: replay.status, order_id: replay.json?.order_id }, { afterPay, afterReplay });
+          scorer.redRec(PHASE, '35.4 x402 replay of the signed payment: same order or refusal, balance unchanged', '200 same order | 402/403/409',
+            safe.ok ? `${replay.status}` : safe.problems.join('; '), safe.ok);
           ledger.push({ rail: 'x402', spentUsd: spent.x402, orderId: px.quote.order_id, receipt: receipt || '' });
         }
       }
@@ -180,6 +207,10 @@ module.exports = async function phase35(scorer, config, context) {
           const d = await waitDelivered(config, pm.quote.order_id, pm.buyer);
           scorer.redRec(PHASE, '35.5 mpp order delivered within 120 s', 'FULFILLED|DELIVERED|CLOSED', String(d.state), d.ok);
           const receipt = checkReceipt(res.headers);
+          checkOrderView(scorer, '35.5 mpp', res.json, d.view);
+          const placed = await postJson(payUrl, { Authorization: `Bearer ${pm.buyer}`, 'X-Idempotency-Key': pm.idem });
+          const pl = e2e.assertAlreadyPlaced({ order_id: res.json?.order_id }, { status: placed.status, body_status: placed.json?.status, order_id: placed.json?.order_id }, null);
+          scorer.redRec(PHASE, '35.5 mpp repeat without payment: already_placed, same order', '200 already_placed', pl.ok ? 'already_placed' : pl.problems.join('; '), pl.ok);
           // Replay of the settled credential: a refusal (403 credential_replayed) or the stored answer; never a second order.
           const again = await sendWithCredential(payUrl, { ...headers }, '{}', res.credential);
           const sameOrder = again.status === 200 && again.json?.order_id === res.json?.order_id;
@@ -191,19 +222,16 @@ module.exports = async function phase35(scorer, config, context) {
       }
     } catch (e) { scorer.recCatch(PHASE, '35.5 mpp purchase', '200', e); }
 
-    // 35.6 — webhook delivery needs a public https receiver and the merchant key; neither is available to a daily run.
-    if (!process.env.E2E_MERCHANT_KEY) {
-      scorer.blocked(PHASE, '35.6 shop.order.paid webhook delivered, signature valid', 'no merchant key', 'E2E_MERCHANT_KEY not set');
-    } else {
-      scorer.blocked(PHASE, '35.6 shop.order.paid webhook delivered, signature valid', 'no public receiver',
-        'the tester-local P32 receiver listens on 127.0.0.1; the webhook URL must be public https, and setting it would overwrite the merchant webhook');
-    }
+    // Webhook delivery (shop.order.paid) needs a public https receiver and the merchant key; a daily run has neither.
+    // It is a recommendation, not a verdict input (ruling-3 R4); the check moves to its own card.
+    scorer.addRec('shop', 'P35 shop.order.paid webhook not verified',
+      'needs a public https receiver and the merchant key; tracked as its own tester card (ruling-3 R4)');
 
     // Spend accounting.
     context.spentX402 = (context.spentX402 || 0) + spent.x402;
     context.spentMPP = (context.spentMPP || 0) + spent.mpp;
     const v = e2e.capVerdict(spent.x402, spent.mpp);
-    scorer.redRec(PHASE, '35.7 spent_usd within the cap', `<= $${e2e.SPEND_CAP_USD}`, `x402=$${spent.x402} mpp=$${spent.mpp} total=$${v.total}`, v.ok);
+    scorer.redRec(PHASE, '35.6 spent_usd within the cap', `<= $${e2e.SPEND_CAP_USD}`, `x402=$${spent.x402} mpp=$${spent.mpp} total=$${v.total}`, v.ok);
     console.log(`  spent_usd x402=${spent.x402} mpp=${spent.mpp}`);
   } catch (e) {
     scorer.recCatch(PHASE, '35.x phase', 'no exception', e);
@@ -223,4 +251,4 @@ module.exports = async function phase35(scorer, config, context) {
   }
 };
 
-module.exports.ASSERTIONS = 20;
+module.exports.ASSERTIONS = 21;
