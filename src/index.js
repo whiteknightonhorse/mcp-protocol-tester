@@ -52,6 +52,7 @@ const phase28 = require('./phases/28-shop-order-e2e');
 const phase29 = require('./phases/29-subscriptions');
 const phase32 = require('./phases/32-webhook-signature');
 const phase34 = require('./phases/34-legal-428');
+const phase35 = require('./phases/35-shop-e2e-paid');
 const phaseReport = require('./phases/report');
 
 async function main() {
@@ -133,6 +134,7 @@ async function main() {
   if (config.phaseEnabled(29)) await phase29(scorer, config, context);
   if (config.phaseEnabled(32)) await phase32(scorer, config, context);
   if (config.phaseEnabled(34)) await phase34(scorer, config, context);
+  if (config.phaseEnabled(35)) await phase35(scorer, config, context);
 
   // Report: Always generate
   const totalTime = Math.round((Date.now() - t0) / 1000);

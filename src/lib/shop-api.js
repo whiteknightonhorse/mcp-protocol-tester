@@ -76,5 +76,5 @@ function wrongAmountPayment(quoteId, payTo, micro) {
 }
 
 module.exports = {
-  SLUG, PLATFORM_BASE, PLATFORM_TEMPO, call, createQuote, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
+  SLUG, PLATFORM_BASE, PLATFORM_TEMPO, base: shopBase, call, createQuote, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
 };

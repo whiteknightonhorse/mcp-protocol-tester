@@ -594,6 +594,45 @@ module.exports = async function phase18(scorer, config, context) {
       offenders.length ? `CRITICAL: ${offenders.join(', ')}` : 'all 9 vectors refused or not found');
   }
 
+  // T-0564 — bypass vectors on the shop routes. Zero spend: a nil-UUID quote and a
+  // nonexistent-session MCP call. Every vector must answer 402, 404 or 400, never 200 with data.
+  console.log('  --- Shop route bypass vectors ---');
+  {
+    const ORIGIN = config.apiBaseUrl;
+    const Z = '00000000-0000-0000-0000-000000000000';
+    const JSON_H = { 'Content-Type': 'application/json' };
+    const rpc = JSON.stringify({ jsonrpc: '2.0', id: 9002, method: 'tools/call', params: { name: 'shop.order.pay', arguments: { quote_id: Z } } });
+    const vectors = [
+      ['pay: no payment', 'POST', `/api/v1/shop/quotes/${Z}/pay`, JSON_H, '{}'],
+      ['pay: garbage X-PAYMENT', 'POST', `/api/v1/shop/quotes/${Z}/pay`, { ...JSON_H, 'X-PAYMENT': 'garbage' }, '{}'],
+      ['pay: garbage Authorization: Payment', 'POST', `/api/v1/shop/quotes/${Z}/pay`, { ...JSON_H, Authorization: 'Payment garbage' }, '{}'],
+      ['pay: encoded slash %2F', 'POST', `/api/v1/shop/quotes/${Z}%2Fpay`, JSON_H, '{}'],
+      ['pay: double slash', 'POST', `/api/v1/shop//quotes/${Z}/pay`, JSON_H, '{}'],
+      ['pay: uppercase /API/v1', 'POST', `/API/v1/shop/quotes/${Z}/pay`, JSON_H, '{}'],
+      ['pay: traversal in quote id', 'POST', '/api/v1/shop/quotes/..%2Fquotes/pay', JSON_H, '{}'],
+      ['/m/<slug>: traversal ..%2f', 'GET', '/m/apibase-demo/..%2f..%2fetc/passwd', {}, undefined],
+      ['/m/<slug>: %2e%2e/admin', 'GET', '/m/apibase-demo/%2e%2e/admin', {}, undefined],
+      ['/m/<slug>: double slash', 'GET', '/m/apibase-demo//x', {}, undefined],
+      ['/m/<slug>/orders', 'GET', '/m/apibase-demo/orders', {}, undefined],
+      ['/m/<slug>/pay POST', 'POST', '/m/apibase-demo/pay', JSON_H, '{}'],
+      ['/mcp/m/<slug>: pay without initialize', 'POST', '/mcp/m/apibase-demo', { ...JSON_H, Accept: 'application/json, text/event-stream' }, rpc],
+      ['/mcp/m/<slug>: encoded trailing slash', 'GET', '/mcp/m/apibase-demo%2F', {}, undefined],
+      ['/mcp/m/<slug>/..', 'GET', '/mcp/m/apibase-demo/..', {}, undefined],
+      ['/mcp/m/<unknown slug>', 'POST', '/mcp/m/nonexistent-shop-xyz', JSON_H, '{}'],
+    ];
+    const offenders = [];
+    for (const [label, method, p, headers, body] of vectors) {
+      const r = await curlRawPath(`${ORIGIN}${p}`, { method, headers, body });
+      const okStatus = [400, 402, 404].includes(r.status);
+      if (!okStatus) offenders.push(`${label} -> ${r.status}`);
+      scorer.recQ(PHASE, `18.X shop bypass ${label}`, '400|402|404', r.status, okStatus, okStatus ? 'refused' : 'CRITICAL: unexpected answer on a shop route');
+      await sleep(150);
+    }
+    scorer.redRec(PHASE, `18.X shop route bypass vectors (${vectors.length}) answer 400/402/404`, '0 other',
+      `${offenders.length}/${vectors.length} other`, offenders.length === 0,
+      offenders.length ? `CRITICAL: ${offenders.join(', ')}` : 'all refused or not found');
+  }
+
   // Summary
   const total = scorer.all.filter(t => t.phase === PHASE).length;
   const passed = scorer.all.filter(t => t.phase === PHASE && t.ok).length;

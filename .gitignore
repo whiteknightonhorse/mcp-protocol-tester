@@ -30,3 +30,6 @@ Thumbs.db
 
 # T-0510: buyer credential of the Base pull probe
 reports/*.secret.json
+
+# T-0564: first-party spend ledger (run data, like the logs)
+reports/spend-*.tsv
