@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "test": "node --max-old-space-size=512 src/index.js",
+    "test:era": "node scripts/test-mcp-era.js",
     "test:dry": "SKIP_PAYMENTS=true node --max-old-space-size=512 src/index.js",
     "test:fast": "PHASES=0,1,4 node --max-old-space-size=512 src/index.js",
     "test:security": "PHASES=0,7,8,9,10 node --max-old-space-size=512 src/index.js",

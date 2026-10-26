@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const { sf, drain, getDelay } = require('../lib/http');
 const { pickSafeProbeTool } = require('../utils/assert');
 const { getX402Client, makeX402PaymentPayload } = require('../lib/x402-client');
+const era = require('../lib/mcp-era');
 const { attachPaymentToMeta, extractPaymentResponseFromMeta } = require('@x402/mcp');
 
 const PHASE = 'P4';
@@ -171,6 +172,109 @@ async function fingerprintChecks(scorer, config, url, sid, apiKey, tools, contex
   }
 }
 
+// 4.E1..4.E5 — MCP era probe (T-0529). No payment is made. An era is recorded, not assumed;
+// RED only when the server's own mcp.json advertises 2026-07-28.
+async function eraChecks(scorer, config, url, sid, apiKey, context) {
+  let advertised = [];
+  try {
+    const r = await sf(`${config.apiBaseUrl}/.well-known/mcp.json`);
+    let j = null;
+    try { j = await r.json(); } catch { await drain(r); }
+    advertised = era.advertisedVersions(j);
+  } catch {}
+  const mustBeModern = advertised.includes(era.MODERN);
+  const gate = (name, exp, got, ok, det) => (mustBeModern
+    ? scorer.redRec(PHASE, name, exp, got, ok, det)
+    : scorer.rec(PHASE, name, exp, got, true, `informational (mcp.json does not list ${era.MODERN})${ok ? '' : ': ' + got} ${det || ''}`));
+
+  // 4.E1
+  let kind = 'legacy';
+  let modernList = null;
+  let supported = [];
+  try {
+    modernList = await era.modernRequest(url, 'tools/list', {}, apiKey);
+    ({ era: kind, supported } = era.classifyEra(modernList));
+    const det = `era=${kind} status=${modernList.status} mcp.json=[${advertised.join(',')}]${supported.length ? ' supported=' + supported.join(',') : ''}`;
+    if (mustBeModern) scorer.redRec(PHASE, '4.E1 era probe', 'modern', kind, kind === 'modern', det);
+    else scorer.rec(PHASE, '4.E1 era probe', 'record era', kind, true, `informational: ${det}`);
+  } catch (e) {
+    scorer.recCatch(PHASE, '4.E1 era probe', 'record era', e);
+  }
+  context.mcpEra = kind;
+  console.log(`  MCP era: ${kind}`);
+  await sleep(200);
+
+  // 4.E2
+  if (kind !== 'modern') {
+    scorer.blocked(PHASE, '4.E2 server/discover', `era-${kind}`, 'server/discover exists only in the modern era');
+  } else {
+    try {
+      const d = await era.modernRequest(url, 'server/discover', {}, apiKey);
+      const got = d.body?.result?.supportedVersions || d.body?.result?.supported_versions || d.body?.result?.protocolVersions;
+      const list = Array.isArray(got) ? got : [];
+      const missing = advertised.filter((v) => !list.includes(v));
+      scorer.rec(PHASE, '4.E2 server/discover', 'versions include mcp.json', `${list.length} listed, ${missing.length} missing`,
+        d.status === 200 && list.length > 0 && missing.length === 0, `status=${d.status}`);
+    } catch (e) {
+      scorer.recCatch(PHASE, '4.E2 server/discover', 'versions include mcp.json', e);
+    }
+    await sleep(200);
+  }
+
+  // 4.E3
+  try {
+    let result = null;
+    if (kind === 'modern') result = modernList.body.result;
+    else if (sid) result = (await era.eraRequest(url, 'tools/list', {}, { apiKey, sid })).body?.result;
+    const ok = era.cachingOk(result);
+    gate('4.E3 list caching fields', 'ttlMs > 0 and cacheScope public|private', ok ? 'present' : `ttlMs=${result?.ttlMs} cacheScope=${result?.cacheScope}`, ok, `era=${kind}`);
+  } catch (e) {
+    scorer.recCatch(PHASE, '4.E3 list caching fields', 'ttlMs + cacheScope', e);
+  }
+  await sleep(200);
+
+  // 4.E4
+  if (kind !== 'modern') {
+    scorer.blocked(PHASE, '4.E4 header mismatch', `era-${kind}`, 'modern-era check');
+  } else {
+    try {
+      const m = await era.modernRequest(url, 'tools/list', {}, apiKey, { metaVersion: '2025-11-25' });
+      scorer.rec(PHASE, '4.E4 header mismatch', '400 + -32020', `${m.status} ${m.body?.error?.code}`,
+        m.status === 400 && m.body?.error?.code === -32020);
+    } catch (e) {
+      scorer.recCatch(PHASE, '4.E4 header mismatch', '400 + -32020', e);
+    }
+    await sleep(200);
+  }
+
+  // 4.E5 — free tool, client without elicitation capability. No payment.
+  try {
+    const names = new Set((context.mcpToolNames || []));
+    const fromCatalog = (context.catalog || []).find((t) => !((t.input_schema?.required?.length) > 0)
+      && !(parseFloat(t.pricing?.price_usd ?? t.price_usd ?? '0') > 0) && names.has(t.id));
+    // Almost every MCP tool is priced and platform.* tools are not in the MCP list, so the fallback is an
+    // UNPAID call to a paid tool: the server answers with a payment challenge, nothing is ever settled.
+    const free = fromCatalog || (names.has(MCP_PAID_TOOL.mcp) ? { id: MCP_PAID_TOOL.mcp } : null);
+    if (!free) {
+      scorer.blocked(PHASE, '4.E5 headless safety', 'no-free-tool', 'no free tool without required args in the MCP tool list');
+    } else {
+      const name = free.id;
+      const res = kind === 'modern'
+        ? await era.modernRequest(url, 'tools/call', { name, arguments: {} }, apiKey)
+        : sid ? await era.eraRequest(url, 'tools/call', { name, arguments: {} }, { apiKey, sid }) : null;
+      if (!res) scorer.blocked(PHASE, '4.E5 headless safety', 'no-session', 'legacy era and no session');
+      else {
+        const bad = era.headlessViolations(res.messages);
+        scorer.rec(PHASE, '4.E5 headless safety', 'no input_required / elicitation', bad.length ? bad.join(',') : 'none', bad.length === 0,
+          `era=${kind} tool=${name} status=${res.status}${fromCatalog ? '' : ' (unpaid call, no payment)'}`);
+      }
+    }
+  } catch (e) {
+    scorer.recCatch(PHASE, '4.E5 headless safety', 'none', e);
+  }
+  await sleep(200);
+}
+
 module.exports = async function phase4(scorer, config, context) {
   console.log('\n--- Phase 4: MCP Protocol ---');
 
@@ -217,6 +321,7 @@ module.exports = async function phase4(scorer, config, context) {
       const list = await mcpRequest(url, 'tools/list', {}, sid, apiKey);
       const tools = list.body?.result?.tools || [];
       listedTools = tools;
+      context.mcpToolNames = tools.map((t) => t.name);
       scorer.rec(PHASE, 'mcp-tools-list', '>0 tools', tools.length, tools.length > 0,
         `${tools.length} tools via MCP`);
     } catch (e) {
@@ -228,6 +333,9 @@ module.exports = async function phase4(scorer, config, context) {
   if (sid) {
     await fingerprintChecks(scorer, config, url, sid, apiKey, listedTools, context);
   }
+
+  // 3.E era probe (T-0529)
+  await eraChecks(scorer, config, url, sid, apiKey, context);
 
   // 4. tools/call — crypto.market.trending
   if (sid) {

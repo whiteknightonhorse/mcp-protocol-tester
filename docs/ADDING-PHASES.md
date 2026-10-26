@@ -109,3 +109,18 @@ const { chargeOnce, obtainCredential, sendWithCredential, runMppxValidate } = re
   synthetic-fixture self-test proving the DETECTOR works (same discipline
   as the CI dual-stub in `scripts/test-verdict-fixtures.js`), rather than
   either skipping the phase or fabricating a fake live failure.
+
+## MCP era probe in P4 (T-0529)
+
+An extension of phase 04, not a new phase. A server's MCP era is recorded, not assumed.
+Vocabulary: `modern` (revision 2026-07-28: no `initialize`, no session, `_meta`
+`io.modelcontextprotocol/protocolVersion` per request), `modern-other-version` (400 with
+JSON-RPC `-32022`, `data.supported` read), `legacy` (initialize + session id).
+Checks: `4.E1` era probe, `4.E2` `server/discover`, `4.E3` `ttlMs`/`cacheScope` on tools/list,
+`4.E4` header/`_meta` version mismatch (`-32020`), `4.E5` headless safety (no `input_required`,
+no server-initiated `elicitation/create`).
+RED-capable only when the server's `/.well-known/mcp.json` lists 2026-07-28 (E1 must be `modern`,
+E3 required); otherwise E1/E3 are informational (recorded, pass). A check that cannot apply in the
+detected era (E2, E4 in legacy) is marked n/a with `scorer.blocked(phase, name, 'era-<era>', ...)`,
+not scored 0. No payment is made: E5 uses an unpaid call. Pure helpers: `src/lib/mcp-era.js`;
+self-test with three fake responses: `npm run test:era` (`scripts/test-mcp-era.js`).
