@@ -1,0 +1,7 @@
+{
+  "GHSA-mrhx-c7xc-m3w5": {
+    "package": "zod",
+    "expires": "2027-01-26",
+    "reason": "zod < 4.6.6 via mppx -> @x402/core (zod ^3.24.2); no zod 3.x patch exists. T-0565 q-1, T-0573 q-1."
+  }
+}

@@ -15,10 +15,10 @@ jobs:
         node-version: [18, 20, 22]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -27,9 +27,9 @@ jobs:
 
       - name: Syntax check
         run: |
-          for f in $(find src -name "*.js") $(find scripts -name "*.js"); do
+          while IFS= read -r f; do
             node -c "$f" || exit 1
-          done
+          done < <(find src scripts -name "*.js")
           echo "All files pass syntax check on Node ${{ matrix.node-version }}"
 
       # Э1 (Fable's audit, 2026-09-02) — this used to be a dry run against

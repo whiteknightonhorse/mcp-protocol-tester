@@ -98,3 +98,7 @@ const r = await sf(`${config.apiUrl}/tools/X/call`, {
 });
 scorer.rec('P7', '7.X Test name', '!200', r.status, r.status !== 200);
 ```
+
+## CI Scanners
+
+`.github/workflows/security-audit.yml` runs three scanners and one audit: [Gitleaks](https://github.com/gitleaks/gitleaks), [TruffleHog](https://github.com/trufflesecurity/trufflehog) (`--only-verified`), [CodeQL](https://codeql.github.com/), and `npm audit --omit=dev --audit-level=high`, which fails the job on a high or critical advisory in production dependencies. Every third-party action is pinned by full commit SHA with the tag in a trailing comment; Dependabot (`github-actions` ecosystem) opens the pin-bump PRs. Advisories with no upstream fix are listed in `.github/audit-allowlist.json` with a reason and an expiry date, evaluated by `scripts/audit-gate.js`; the run log prints every waived advisory, and an expired or newly fixable entry fails the job.

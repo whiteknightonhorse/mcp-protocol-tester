@@ -31,7 +31,7 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 - **Provider health map** — per-provider status and latency tracking
 - **Universal** — works with ANY MCP server, not just APIbase
 - **Scoring** — 0-100 score with A+/A/B/C/D/F grade
-- **CI-ready** — GitHub Actions with TruffleHog, Gitleaks, CodeQL, Snyk
+- **CI-ready** — GitHub Actions with TruffleHog, Gitleaks, CodeQL, npm audit
 - **Zero build** — plain Node.js, no TypeScript compilation needed
 
 ## Quick Start
@@ -240,7 +240,7 @@ Both protocols can coexist on the same server — this tester verifies both work
 |-------|--------|-----|
 | **No hardcoded secrets** | Verified on every commit | [TruffleHog](https://github.com/trufflesecurity/trufflehog) + [Gitleaks](https://github.com/gitleaks/gitleaks) scan |
 | **No code vulnerabilities** | Verified on every commit | [GitHub CodeQL](https://codeql.github.com/) static analysis |
-| **No dependency vulnerabilities** | Weekly scan | `npm audit` + [Snyk](https://snyk.io/) |
+| **No dependency vulnerabilities** | Weekly scan | `npm audit --omit=dev --audit-level=high` (fails the job on high or critical; unfixable advisories only via a dated allowlist, see [CI Scanners](docs/SECURITY.md#ci-scanners)) |
 | **No data exfiltration** | Verified on every commit | Custom scan for eval(), child_process, suspicious fetch calls |
 | **No secret logging** | Verified on every commit | Grep for console.log with env vars |
 | **Private keys stay local** | `.env` in `.gitignore` | Keys never leave your machine |
@@ -332,7 +332,7 @@ mcp-protocol-tester/
 │   ├── ADDING-PHASES.md           # How to add test phases
 │   └── SECURITY.md                # Security test details
 ├── .github/workflows/
-│   ├── security-audit.yml         # TruffleHog + Gitleaks + CodeQL + Snyk + custom scans
+│   ├── security-audit.yml         # TruffleHog + Gitleaks + CodeQL + npm audit + custom scans
 │   └── ci.yml                     # Syntax check + dry run on Node 18/20/22
 ├── .env.example                   # Template (no real keys)
 ├── .gitignore
