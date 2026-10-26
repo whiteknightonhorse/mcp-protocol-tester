@@ -1,14 +1,12 @@
 /**
- * Phase 15 — Report Generation
+ * Report generation (not a numbered phase: always runs last)
  * Computes final grade and displays summary.
  * Weights are defined in lib/reporter.js (single source of truth).
  */
 const { generateReport, WEIGHTS } = require('../lib/reporter');
 
-const PHASE = 'P20';
-
-module.exports = async function phase17(scorer, config, context) {
-  console.log('\n--- Phase 17: Report ---');
+module.exports = async function phaseReport(scorer, config, context) {
+  console.log('\n--- Report ---');
 
   const meta = {
     serverUrl: config.apiBaseUrl,

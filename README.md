@@ -4,6 +4,7 @@
 
 [![Security Audit](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml/badge.svg)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml)
 [![CI](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/ci.yml)
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fwhiteknightonhorse%2Fmcp-protocol-tester%2Fmain%2Fpackage.json&query=%24.version&label=version)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js)](https://nodejs.org)
 [![No Secrets](https://img.shields.io/badge/Secrets-None%20Detected-brightgreen?logo=keybase)](https://github.com/whiteknightonhorse/mcp-protocol-tester/actions/workflows/security-audit.yml)
@@ -15,7 +16,7 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 
 ## Features
 
-- **20-phase test suite** — 920+ assertions across discovery, payments, security, anti-abuse, and agent UX
+- **Phased test suite** (see [docs/PHASES.md](docs/PHASES.md)) — assertions across discovery, payments, security, anti-abuse, and agent UX
 - **Dual-rail payment testing** — x402 + MPP in parallel with cross-rail price validation
 - **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
 - **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
@@ -40,14 +41,16 @@ git clone https://github.com/whiteknightonhorse/mcp-protocol-tester.git
 cd mcp-protocol-tester
 npm install
 cp .env.example .env
-# Edit .env with your server URL and wallet keys
+# Edit .env with your server URL (and, only to spend, a wallet key)
 npm test
 ```
+
+`npm test` runs every phase with zero spend: `.env.example` ships `SKIP_PAYMENTS=true`, no `PHASES` filter and an empty `API_KEY`. `SKIP_PAYMENTS=false` spends in every phase whose Cost column is not $0 (the list is in the phase table below and in [docs/PHASES.md](docs/PHASES.md)).
 
 ## Usage
 
 ```bash
-# Full dual-rail test (all 20 phases)
+# All phases (zero spend while SKIP_PAYMENTS=true)
 npm test
 
 # Dry run — no real payments, tests challenges and security only
@@ -88,60 +91,55 @@ CONCURRENCY=10 npm test
 
 > **Note:** Any CRITICAL (500) server error automatically caps the grade at D. Skipped phases score 0%.
 
-## Phases (20)
+## Phases
 
-| Phase | Name               | What it tests                                                         | Cost    |
-|-------|--------------------|-----------------------------------------------------------------------|---------|
-| P0    | Discovery          | Catalog fetch, schema validation, `.well-known/*`, dual-rail detection, internal tool leak check, well-known CORS | $0 |
-| P1    | Infrastructure     | Health, Tempo/Base RPC, USDC + gas balances, facilitator, health info leakage check | $0 |
-| P2    | MPP Challenges     | `WWW-Authenticate: Payment` on all tools + field validation (recipient, amount, chainId) + currency pin (exactly one currency, USDC.e on mainnet / pathUSD on testnet, never OUSD; RED) + challenge id and `expires` | $0 |
-| P3    | x402 Challenges    | x402 402 body on all tools + field validation (payTo, network, asset, scheme, multi-accept), challenge nonce uniqueness, `Cache-Control: no-store` on the 402 of each rail, `maxTimeoutSeconds` == 120 | $0 |
-| P4    | MCP Protocol       | initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation, JSON-RPC error codes, session fixation, oversized payload, ID type handling, paid tool without payment -> `isError` + `_meta["x402/payment-required"]` equal to the HTTP 402 `accepts[]`, x402 payment in `params._meta` -> `_meta["x402/payment-response"]`, tool-definition fingerprint (definition_sha256 recompute REST/MCP/manifest, ETag 304, tamper self-test), MCP era probe (4.E1 era `modern` / `modern-other-version` / `legacy` via a 2026-07-28 request without initialize, 4.E2 `server/discover`, 4.E3 `ttlMs`/`cacheScope`, 4.E4 header mismatch `-32020`, 4.E5 headless client never gets `input_required`/`elicitation`; RED only if mcp.json lists 2026-07-28; no payment made) | ~$0.001 |
-| P5    | MPP Payments       | Real Tempo USDC.e payments via mppx 0.13.5 + response content validation; current-client receipt with tx-hash reference (RED); legacy mppx 0.8.19 client lane; replay of a settled credential is refused (RED) and answered with a final 403 `credential_replayed`, `charged:false` (rec); credential in `Payment-Authorization` next to a Bearer key -> 200; both headers with credentials -> 400; `mppx validate` child process | ~$0.01  |
-| P6    | x402 Payments      | Real Base USDC payments via @x402/core + response content validation   | ~$0.05  |
-| P7    | Basic Security     | Auth bypass, forged credentials, HTTP method enforcement + override bypass, Content-Type manipulation, request ID, path traversal, expanded hidden endpoints (+10), request smuggling | $0 |
-| P8    | Payment Security   | Replay (same/cross-tool), race condition (10 parallel), double-spend, amount manipulation (0/negative/underpay/tampered payTo/integer overflow 2^64), float precision, off-by-one (999 vs 1000), expired challenge, wrong network (testnet→mainnet), cross-rail price consistency; MPP replay answer is a final 403 `credential_replayed` (400 only for forged credentials) | ~$0.01 |
-| P9    | Advanced Security  | SSRF (AWS/GCP/localhost/file:// + IPv6/octal/decimal), timing attacks, CORS + subdomain confusion + expose-headers audit, header injection (CRLF/64KB/Host), fuzz (null bytes/unicode/JSON bomb/prototype pollution), XXE injection, SSTI payloads, ReDoS, response analysis | $0 |
-| P10   | Resilience         | Brute force (50 keys), XFF + 5 IP spoofing headers bypass, SSL/TLS version + cipher + cert expiry + TLSv1.1 rejection, enumeration, error cascade, referrer-policy, rate limit granularity (per-key) | $0 |
-| P11   | Load Test          | Concurrent requests, mixed endpoints, sustained load, latency p50/p95/p99, ramp-up (1→5→10→25), large body DoS (1MB) | $0 |
-| P12   | Provider Health    | 1 tool per provider → HEALTHY/DOWN/RATE_LIMITED + latency, provider error sanitization | $0 |
-| P13   | Cache & Simulation | Cache isolation, cache leak test, cache poisoning (X-Forwarded-Host), cache key collision, User-Agent/Accept variation, REST+MCP simultaneous, error schema | $0 |
-| P14   | Discover Tools     | Category enumeration (21 cats), category+task combos, stemming, keyword relevance, abuse (SQLi/XSS/unicode/10k chars), truncation, performance | $0 |
-| P15   | Platform Features  | Usage Analytics (account.usage/tools/timeseries), Tool Quality Index (tool_quality/rankings), Batch API (call_batch + REST), recursive batch, batch tool_id injection, cross-feature validation | $0 |
-| P16   | Agent Experience   | Zero-knowledge bootstrap, tool description quality, error actionability (400/402/429), payment UX, response consistency, E2E lifecycle (golden path), MCP protocol completeness, error path leakage | $0 |
-| P17   | Payment Bypass     | MCP session payment enforcement, replay after 30s delay, signed underpayment, pay-cheap-use-expensive, cache leak across keys, price consistency, MCP batch abuse, header case/duplication, Content-Type bypass, prototype pollution, session ID entropy, double-spend 100x, cross-rail nonce, cross-chain replay, WebSocket upgrade bypass, burst 50 unpaid, chunked encoding bypass, nonce entropy, 9 path-encoding bypass vectors (`%2F`, `%5C`, raw backslash, `/call/..%2F`, double slash, `/API/v1`, `%0A`, `/mcp%2F`, `/mcp/..`; RED, $0) | ~$0.01 |
-| P18   | CDP Facilitator    | PayAI health + Base mainnet + Bazaar extension, CDP auth-gated, 402 wallet/network/asset/version consistency across tools, MPP dual-rail header, health/catalog/free/paid architecture checks, facilitator TLS, wallet constant | $0 |
-| P19   | Report             | Score, grade, per-phase breakdown, recommendations, txt + JSON export | $0      |
-| P20   | Moderation E2E     | Real trigger content through a real paid call (sacrificial key only), asserts blocked + settle-on-block holds after 90s | ~$0.001 |
-| P21   | Appeals            | /appeals/:id + /api/v1/appeals/:id path-param fuzz (5 hostile values x 2 routes), immediate liveness check after each | $0 |
-| P22   | Balance Rail       | Plain-Bearer call (no x402/MPP header) against a priced tool must pay from balance; balance must actually decrease (sacrificial key only) | varies |
-| P23   | Devices            | device.list/state/command + safety-gate rejection of an out-of-bounds command (sacrificial key only) | $0 |
-| P24   | Docs/Catalog Truth | Every static page's `tools/<id>/call` references cross-checked against the live catalog; homepage tool-count drift; `/about` and `/index.md` (200, content-type, canonical, forbidden phrases); payment wording on `/integrator/agent-guide`, `/auth.md`, `/llms.txt`, `/.well-known/x402-payment.json` (`mppx >= 0.6.16`, `USDC.e`, no `coinbase/x402`, no "memo" next to "quote") | $0 |
-| P25   | Time Promises      | Plants a real expiring moderation record, verifies it's actually gone after the real 14-day retention window (sacrificial key only) | ~$0.001 |
-| P26   | Coverage Parity    | Live nginx.conf's declared public locations vs this suite's own probed-route inventory | $0 |
-| P27   | Storefront Surface | Demo shop MCP initialize + tools/list, `/m/<slug>` + agent.json + llms.txt URLs, `/shops`, `/integrator` (+ Markdown negotiation), discover `kind=merchant` vs `/shops` parity (demo mode, GET only) | $0 |
-| P28   | Shop Order Flow    | Demo shop quote for demo-bundle, 402 challenge (amount, x402 payTo is not the platform wallet; MPP recipient is a well-formed address, and for apibase-demo only the not-platform-Tempo check is SKIPPED because its Tempo payout is the operator wallet by design, the stream pilot requires it: docs/integrator.md:94, src/shop/stream-session.ts:187-219; both rails), replay of the same quote -> same binding, amount mismatch -> 402 with the order left QUOTED; pay -> DELIVERED and receipt replay are SKIPPED (no demo settlement, would cost money) | $0 |
-| P29   | Subscriptions      | demo-daily subscribe quote + terms (daily, 72 h window), 402 challenge, refusals (non-subscription SKU, qty 2), 404 on unknown subscription routes; renewal / cancel / double-renew / past_due are SKIPPED (need a paid period 1); when the docs list the `mpp_subscription` pull mode, `shop.subscription.get` must describe it | $0 |
-| P32   | Webhook Signature  | Tester-local HTTP receiver: valid HMAC accepted, wrong secret and tampered body rejected, replayed delivery id ignored, timestamp older than 300 s rejected; scheme from `src/shop/webhook/webhook.service.ts:37-40` | $0 |
-| P34   | Legal 428 Gate     | `/legal/index.json` sha256 vs served bodies; unaccepted-merchant quote gate: machine-readable 428 once a document is past the 30-day re-accept window (before that: not refused) | $0 |
+One numbering: file prefix = `PHASES` value = report label. The table below and [docs/PHASES.md](docs/PHASES.md) (files, weights, what each phase tests) are generated by `npm run phases:doc` from `src/index.js` and `src/lib/reporter.js`; `npm test` runs `phases:check` first and fails on drift. P24 (documentation truth): red means the site contradicts the code.
 
-⚠️ **Note found in passing while adding P20-P26 (not fixed — out of this
-pass's scope):** this table's OWN numbering for P15-P18 above does not match
-the actual code (`src/phases/16-platform-features.js` is really `P16` in
-`src/index.js`/`src/lib/reporter.js`'s `WEIGHTS`, not the `P15` this table
-shows — the same one-off shift that `reporter.js`'s old labels array had,
-fixed there in the Э1 pass but not re-derived here). Treat `src/index.js`'s
-`config.phaseEnabled(N)` calls and `WEIGHTS` in `src/lib/reporter.js` as the
-actual source of truth for phase numbers; a full renumbering pass of this
-table is its own task.
+<!-- phases:begin (generated by npm run phases:doc, do not edit) -->
+| Phase | Name | Cost |
+|-------|------|------|
+| P0 | Discovery | $0 |
+| P1 | Infrastructure | $0 |
+| P2 | MPP Challenges | $0 |
+| P3 | x402 Challenges | $0 |
+| P4 | MCP Protocol | ~$0.001 |
+| P5 | MPP Payments | ~$0.01 |
+| P6 | x402 Payments | ~$0.05 |
+| P7 | Basic Security | $0 |
+| P8 | Payment Security | ~$0.01 |
+| P9 | Advanced Security | $0 |
+| P10 | Resilience | $0 |
+| P11 | Load Test | $0 |
+| P12 | Provider Health | $0 |
+| P13 | Cache & Simulation | $0 |
+| P14 | Discover Tools | $0 |
+| P16 | Platform Features | $0 |
+| P17 | Agent Experience | $0 |
+| P18 | Payment Bypass | ~$0.01 |
+| P19 | CDP Facilitator | $0 |
+| P20 | Moderation E2E | ~$0.001 |
+| P21 | Appeals | $0 |
+| P22 | Balance Rail | varies |
+| P23 | Devices | $0 |
+| P24 | Docs/Catalog Truth | $0 |
+| P25 | Time Promises | ~$0.001 |
+| P26 | Coverage Parity | $0 |
+| P27 | Storefront Surface | $0 |
+| P28 | Shop Order Flow | $0 |
+| P29 | Subscriptions | $0 |
+| P32 | Webhook Signature | $0 |
+| P34 | Legal 428 Gate | $0 |
 
-P20-P26 (Э3, Fable's audit 2026-09-02) need an operator-provisioned
+Phases that can spend (Cost not $0): P4, P5, P6, P8, P18, P20, P22, P25. What each phase tests, its file and weight: [docs/PHASES.md](docs/PHASES.md).
+<!-- phases:end -->
+
+The moderation, balance and device phases (P20, P22, P23, P25) need an operator-provisioned
 sacrificial/test identity (`MODERATION_TEST_API_KEY`, `BALANCE_RAIL_TEST_KEY`,
 `DEVICE_TEST_API_KEY` — see `.env.example`) and SKIP cleanly without one;
 they never fall back to the primary `API_KEY`.
 
-**Total estimated cost:** ~$0.07 per full run (plus a few tenths of a cent
-more once P20/P22/P25 are provisioned).
+**Total estimated cost** with `SKIP_PAYMENTS=false`: ~$0.07 per full run; $0 with `SKIP_PAYMENTS=true` (the shipped default) (plus a few tenths of a cent
+more once the sacrificial-key phases are provisioned).
 
 ## Environment Variables
 
@@ -149,16 +147,16 @@ more once P20/P22/P25 are provisioned).
 |-------------------|----------|-------------------------------------|--------------------------------------|
 | `API_BASE_URL`    | Yes      | `https://apibase.pro`               | Target server base URL               |
 | `MCP_SERVER_URL`  | No       | `{API_BASE_URL}/mcp`                | MCP endpoint URL                     |
-| `API_KEY`         | No       | (none)                              | API key for authenticated requests   |
+| `API_KEY`         | No       | (none)                              | Leave empty for unauthenticated probing; set only for authenticated checks |
 | `PRIVATE_KEY`     | No*      | (none)                              | Wallet private key for payments      |
 | `CONCURRENCY`     | No       | `5`                                 | Parallel requests in load test       |
-| `SKIP_PAYMENTS`   | No       | `false`                             | Skip real payment tests              |
-| `PHASES`          | No       | `0,1,2,...,15` (all)                | Comma-separated phase numbers        |
+| `SKIP_PAYMENTS`   | No       | `false` in code, `true` in the shipped example file | `true`: no wallet is loaded and no phase spends |
+| `PHASES`          | No       | unset = all phases                  | Comma-separated phase numbers        |
 | `MAX_TOOLS`       | No       | `0` (all)                           | Max tools to test (0 = unlimited)    |
 | `TIMEOUT_MS`      | No       | `30000`                             | Per-request timeout in ms            |
 | `MAX_USDC_BUDGET` | No       | `0.25`                              | Spending cap per protocol            |
 
-> \* `PRIVATE_KEY` is required only for payment phases (P5, P6, P8). The same key works on both Base and Tempo chains.
+> \* `PRIVATE_KEY` is required by every phase whose Cost column is not $0. The same key works on both Base and Tempo chains.
 
 ## Testing Your Own MCP Server
 
@@ -183,9 +181,9 @@ more once P20/P22/P25 are provisioned).
 | P11   | Any HTTP endpoint                                                             |
 | P12   | `POST /api/v1/tools/{id}/call`                                                |
 | P13   | REST + MCP endpoints                                                          |
-| P14   | MCP `prompts/get` with `discover_tools` prompt                                |
-| P15   | Platform tools: `account.usage`, `platform.tool_quality`, `platform.call_batch` |
-| P16   | `.well-known/*` discovery, MCP session, tool descriptions, error messages      |
+| P14   | `apibase.discover` tool and `GET /api/v1/discover`; MCP `prompts/get` `discover_tools` as the compatibility check; `categories_count` in `/.well-known/mcp.json` |
+| P16   | Platform tools: `account.usage`, `platform.tool_quality`, `platform.call_batch` |
+| P17   | `.well-known/*` discovery, MCP session, tool descriptions, error messages      |
 
 ## Reports
 
@@ -308,27 +306,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for details on what the security test p
 mcp-protocol-tester/
 ├── src/
 │   ├── index.js                   # Main entry point / CLI
-│   ├── phases/
-│   │   ├── 00-discovery.js        # P0: Catalog, schema validation, .well-known, dual-rail
-│   │   ├── 01-infrastructure.js   # P1: Health, RPC, USDC + gas balances
-│   │   ├── 02-mpp-challenges.js   # P2: MPP 402 + field validation (recipient, chainId)
-│   │   ├── 03-x402-challenges.js  # P3: x402 402 + field validation (payTo, network, asset)
-│   │   ├── 04-mcp-protocol.js     # P4: MCP init/list/call + resources + prompts + version
-│   │   ├── 05-mpp-payments.js     # P5: Real MPP payments + response validation
-│   │   ├── 06-x402-payments.js    # P6: Real x402 payments + response validation
-│   │   ├── 07-security.js         # P7: Auth, credentials, HTTP methods, Content-Type
-│   │   ├── 08-payment-security.js # P8: Replay, race, double-spend, amounts, cross-rail
-│   │   ├── 09-advanced-security.js# P9: SSRF, timing, CORS, headers, fuzz, response
-│   │   ├── 10-resilience.js       # P10: Brute force, TLS cipher/cert, enumeration
-│   │   ├── 11-load.js             # P11: Concurrent, sustained, percentiles, ramp-up
-│   │   ├── 12-provider-health.js  # P12: Per-provider health map
-│   │   ├── 13-cache-simulation.js # P13: Cache leak, User-Agent, REST+MCP, errors
-│   │   ├── 14-discover-tools.js   # P14: Categories, stemming, relevance, abuse
-│   │   ├── 16-platform-features.js# P15: Usage Analytics, Tool Quality, Batch API
-│   │   ├── 17-agent-experience.js # P16: Bootstrap, descriptions, errors, E2E lifecycle
-│   │   ├── 18-payment-bypass.js   # P17: Anti-abuse, replay, double-spend, cache leak
-│   │   ├── 19-cdp-facilitator.js  # P18: CDP/PayAI dual-facilitator, wallet consistency
-│   │   └── 15-report.js           # P19: Grade, breakdown, export
+│   ├── phases/                    # one file per phase, see docs/PHASES.md
 │   ├── lib/
 │   │   ├── config.js              # dotenv + env loader
 │   │   ├── http.js                # HTTP client with timeout + provider delays

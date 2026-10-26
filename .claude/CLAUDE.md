@@ -14,9 +14,9 @@
 
 ## File Structure
 - Phases: `src/phases/NN-name.js` — export `async function(scorer, config, context)`
-- Phase ID: `'P0'` through `'P19'` — must match WEIGHTS in `reporter.js`
+- Phase ID: must match WEIGHTS in `reporter.js` and the file prefix; ids and files: see docs/PHASES.md (`npm run phases:check` enforces it)
 - WEIGHTS single source of truth: `src/lib/reporter.js`
-- Report phase is ALWAYS last (highest P number)
+- The report (`src/phases/report.js`) is not a numbered phase and ALWAYS runs last
 
 ## Testing Conventions
 - `scorer.rec()` for important tests (with console output)
@@ -34,7 +34,7 @@
 
 ## API Conventions
 - Tool call endpoint: `/api/v1/tools/{id}/call` (NOT `/run`)
-- Catalog: `GET /api/v1/tools?limit=1000` (single request)
+- Catalog: `GET /api/v1/tools?limit=2000`, follow `pagination.cursor` until `has_more` is false (P0 `catalog-complete`)
 - Auth: `Authorization: Bearer {api_key}` or `X-API-Key: {api_key}`
 - No agent registration endpoint (auto-registration by API key)
 
@@ -42,5 +42,5 @@
 - `status: 'TMO'` → use `status: 0` with `_timeout: true`
 - `Math.random()` for RPC ID → use monotonic counter
 - Weights in two files → only in `reporter.js`
-- `?page=N` pagination → `?limit=1000`
+- `?page=N` pagination → `?cursor=` from `pagination.cursor`
 - Phase 0 skipped → empty catalog → misleading results (Phase 0 always runs)

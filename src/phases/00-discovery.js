@@ -18,24 +18,48 @@ async function wellKnown(scorer, baseUrl, path, label) {
   return body;
 }
 
+// Token-boundary match on the tool id: `test_tool.x` leaks, `global-health-covid.latest_snapshot` does not.
+const INTERNAL_ID_RE = /^(internal|admin|debug|test)[._]|[._](internal|admin|debug|test)[._]/;
+function isInternalToolId(id) {
+  return typeof id === 'string' && INTERNAL_ID_RE.test(id.toLowerCase());
+}
+
 module.exports = async function phase0(scorer, config, context) {
   console.log('\n--- Phase 0: Discovery ---');
 
-  // 1. Fetch tool catalog (single request — API returns all tools at once)
+  // 1. Fetch the whole tool catalog: follow pagination.cursor until has_more is false
   let tools = [];
-  const r0 = await sf(`${config.apiUrl}/tools?limit=1000`);
-  if (r0.status === 200) {
+  let total = null;
+  let cursor = null;
+  let fetchOk = true;
+  for (let page = 0; page < 50; page++) {
+    const q = `limit=2000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const r0 = await sf(`${config.apiUrl}/tools?${q}`);
+    if (r0.status !== 200) {
+      scorer.redRec(PHASE, 'catalog-fetch', 200, r0.status, false, `catalog fetch failed on page ${page + 1}`);
+      await drain(r0);
+      fetchOk = false;
+      break;
+    }
     const data = await r0.json();
-    tools = Array.isArray(data) ? data : (data.tools || data.data || []);
-  } else {
-    scorer.redRec(PHASE, 'catalog-fetch', 200, r0.status, false, 'catalog fetch failed');
-    await drain(r0);
+    tools = tools.concat(Array.isArray(data) ? data : (data.tools || data.data || []));
+    if (data && typeof data.total === 'number') total = data.total;
+    const pg = (data && data.pagination) || {};
+    if (!pg.has_more || !pg.cursor) break;
+    cursor = pg.cursor;
   }
 
   context.catalog = tools;
   const maxNote = config.maxTools > 0 ? ` (max ${config.maxTools})` : '';
   scorer.redRec(PHASE, 'catalog-count', '>0', tools.length, tools.length > 0,
     `${tools.length} tools loaded${maxNote}`);
+
+  if (fetchOk) {
+    const complete = total === null ? true : tools.length === total;
+    scorer.redRec(PHASE, 'catalog-complete', total === null ? 'no total reported' : total, tools.length, complete,
+      `loaded=${tools.length} total=${total === null ? 'n/a' : total}`);
+    console.log(`  catalog-complete: loaded=${tools.length} total=${total === null ? 'n/a' : total}`);
+  }
 
   // Catalog schema validation (spot check first 50 tools)
   let validSchemas = 0;
@@ -100,11 +124,7 @@ module.exports = async function phase0(scorer, config, context) {
   }
 
   // P0.X Internal tools check
-  const internalPatterns = ['internal', 'admin', 'debug', 'test_'];
-  const internalTools = context.catalog.filter(t => {
-    const id = (t.id || t.name || '').toLowerCase();
-    return internalPatterns.some(p => id.includes(p));
-  });
+  const internalTools = context.catalog.filter(t => isInternalToolId(t.id || t.name));
   scorer.rec(PHASE, 'catalog-no-internal', '0 internal', internalTools.length,
     internalTools.length === 0,
     internalTools.length > 0 ? `LEAK: ${internalTools.map(t=>t.id).join(', ')}` : 'clean');
@@ -121,3 +141,5 @@ module.exports = async function phase0(scorer, config, context) {
 
   console.log(`  Catalog: ${context.catalog.length} tools | MPP: ${context.hasMPP} | x402: ${context.hasX402}`);
 };
+
+module.exports.isInternalToolId = isInternalToolId;

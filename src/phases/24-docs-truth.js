@@ -33,14 +33,20 @@ const PHASE = 'P24';
 // allow-list entry so a stale reference on any of them is caught for real.
 const STATIC_PAGES = ['/', '/connect', '/frameworks', '/pricing', '/catalog', '/dashboard',
   '/contact', '/privacy', '/terms', '/policy/moderation', '/why', '/partners',
-  '/flight-search-intent', '/image-generation-intent', '/company-research-intent'];
+  '/flight-search-intent', '/image-generation-intent', '/company-research-intent',
+  // T-0538: SITE-AUDIT pages; red until the site fixes land (intended).
+  '/about', '/integrator', '/integrator/docs', '/integrator/agent-guide'];
 
 // T-0348: pages whose body must stay clean of placeholder / draft markers.
 // P24 had no such list before this card; it is introduced here for /about and
 // /index.md (the "Drafts, not yet published" banner is what an unpublished
 // integrator page renders).
+// T-0538 (SITE-AUDIT): wording the code contradicts; checked on every static page
+// and red on prod until the site fixes deploy (intended).
+const SITE_AUDIT_PHRASES = ['never billed', 'auto-refunded', 'Top up once', '/agents/rotate',
+  'Idempotency-Replay', 'X-Receipt-Id', 'discover_tools prompt with'];
 const FORBIDDEN_PHRASES = ['not yet published', 'lorem ipsum', 'TODO', 'FIXME', 'undefined', '[object Object]',
-  'coingecko.get_price'];
+  'coingecko.get_price', ...SITE_AUDIT_PHRASES];
 
 // T-0348: { path, ct } probes added for the pages 26.1 reported as unprobed.
 const TRUTH_PROBES = [
@@ -71,6 +77,7 @@ module.exports = async function phase24(scorer, config, context) {
 
   // 24.1 — real pages, real catalog.
   let candidateStale = [];
+  const auditHits = [];
   for (const page of STATIC_PAGES) {
     let html = '';
     try {
@@ -81,6 +88,8 @@ module.exports = async function phase24(scorer, config, context) {
       scorer.recCatch(PHASE, `24.1 ${page} reachable`, '200', e);
       continue;
     }
+    const lower = html.toLowerCase();
+    for (const ph of SITE_AUDIT_PHRASES) if (lower.includes(ph.toLowerCase())) auditHits.push(`${page}:${ph}`);
     const refs = extractToolRefs(html);
     const stale = refs.filter((id) => !catalogIds.has(id));
     if (stale.length > 0) {
@@ -107,6 +116,8 @@ module.exports = async function phase24(scorer, config, context) {
       allStale.push(entry);
     }
   }
+  scorer.rec(PHASE, '24.2b no SITE-AUDIT forbidden phrases on any static page', 'none',
+    auditHits.join(', ') || 'none', auditHits.length === 0);
   // RED: a doc page telling every new visitor to call a tool that doesn't
   // exist is exactly the class this phase exists to catch, independent of
   // score — same conversion-critical-surface reasoning as the original Д6.

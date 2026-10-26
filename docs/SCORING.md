@@ -6,7 +6,7 @@
 A run's VERDICT is FAIL, independent of how high the score is, if any of:
 - a RED-class assertion failed — a real money e2e path, a crash/liveness
   check, a public 404, or a catalog-sanity precondition (see `redRec()` call
-  sites across the phases, especially P20-P26);
+  sites across the phases, especially the phases listed in PHASES.md);
 - a CRITICAL error was recorded (500s, etc.);
 - one of the RED assertions added by T-0433 failed: P2 currency pin (exactly
   one currency, USDC.e on mainnet / pathUSD on testnet, never OUSD), P5 current
@@ -22,37 +22,13 @@ see `src/lib/scoring.js` and `src/lib/http.js`'s `-1` sentinel. `run-daily.sh`
 diffs today's failures against a standing-red ledger
 (`scripts/verdict-runner.js`) and escalates anything red for 3+ days.
 
-⚠️ **The phase table and weights below this line predate the verdict layer
-and have drifted from the actual `WEIGHTS` array in `src/lib/reporter.js`
-for a while (there is no P5=15/P6=15/P9="Summary" in the real code) — this
-was found in passing while adding the verdict layer, not fixed here (a full
-rewrite of this doc against the current 27-phase reality is its own task,
-not part of Fable's named findings). Treat `src/lib/reporter.js`'s `WEIGHTS`
-array as the actual source of truth for current weights/phases.
-
----
+Phase ids, files and weights: [PHASES.md](PHASES.md) (generated from `src/lib/reporter.js` WEIGHTS; the single source of truth).
 
 # Scoring Methodology
 
 ## Overview
 
-The tester evaluates MCP servers across 10 phases, each with a weighted score. The final grade is computed from the weighted sum.
-
-## Phase Weights
-
-| Phase | Weight | Name              |
-|-------|--------|-------------------|
-| P0    | 10     | Discovery         |
-| P1    | 10     | Infrastructure    |
-| P2    | 10     | MPP Challenges    |
-| P3    | 10     | x402 Challenges   |
-| P4    | 10     | MCP Protocol      |
-| P5    | 15     | MPP Payments      |
-| P6    | 15     | x402 Payments     |
-| P7    | 10     | Security          |
-| P8    | 5      | Load Test         |
-| P9    | 5      | Summary           |
-| **Total** | **100** |              |
+The tester evaluates MCP servers across weighted phases. The final grade is computed from the weighted sum.
 
 ## Grade Calculation
 

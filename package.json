@@ -1,10 +1,12 @@
 {
   "name": "mcp-protocol-tester",
-  "version": "1.0.0",
+  "version": "4.1.0",
   "description": "Universal test suite for MCP servers — dual-rail payment testing (x402 + MPP/Tempo), 402 challenge validation, security audit, load testing",
   "main": "src/index.js",
   "scripts": {
-    "test": "node --max-old-space-size=512 src/index.js",
+    "test": "npm run phases:check && node scripts/test-internal-pattern.js && node --max-old-space-size=512 src/index.js",
+    "phases:doc": "node scripts/phases-doc.js",
+    "phases:check": "node scripts/phases-doc.js --check",
     "test:era": "node scripts/test-mcp-era.js",
     "test:dry": "SKIP_PAYMENTS=true node --max-old-space-size=512 src/index.js",
     "test:fast": "PHASES=0,1,4 node --max-old-space-size=512 src/index.js",

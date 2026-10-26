@@ -19,7 +19,7 @@ const { initX402, getWalletAddress } = require('./lib/x402-client');
 const { initMPP } = require('./lib/mpp-client');
 const { generateReport } = require('./lib/reporter');
 
-// Phase modules (18 phases: P0-P17 + report)
+// Phase modules: file prefix = PHASES value = report label (table: docs/PHASES.md)
 const phase0  = require('./phases/00-discovery');
 const phase1  = require('./phases/01-infrastructure');
 const phase2  = require('./phases/02-mpp-challenges');
@@ -35,10 +35,10 @@ const phase11 = require('./phases/11-load');
 const phase12 = require('./phases/12-provider-health');
 const phase13 = require('./phases/13-cache-simulation');
 const phase14 = require('./phases/14-discover-tools');
-const phase15 = require('./phases/16-platform-features');
-const phase16 = require('./phases/17-agent-experience');
-const phase17 = require('./phases/18-payment-bypass');
-const phase18 = require('./phases/19-cdp-facilitator');
+const phase16 = require('./phases/16-platform-features');
+const phase17 = require('./phases/17-agent-experience');
+const phase18 = require('./phases/18-payment-bypass');
+const phase19 = require('./phases/19-cdp-facilitator');
 // Э3 (Fable's audit 2026-09-02) — coverage-parity phases.
 const phase20 = require('./phases/20-moderation-settle');
 const phase21 = require('./phases/21-appeals');
@@ -52,7 +52,7 @@ const phase28 = require('./phases/28-shop-order-e2e');
 const phase29 = require('./phases/29-subscriptions');
 const phase32 = require('./phases/32-webhook-signature');
 const phase34 = require('./phases/34-legal-428');
-const phaseReport = require('./phases/15-report');
+const phaseReport = require('./phases/report');
 
 async function main() {
   const t0 = Date.now();
@@ -85,9 +85,11 @@ async function main() {
   setTesterId(config.testerRunId);
 
   // Init payment clients
-  const x402ok = config.privateKey ? initX402(config.privateKey) : false;
-  const mppok = config.privateKey ? initMPP(config.privateKey) : false;
-  if (config.privateKey) initMPP(config.privateKey, { legacy: true });
+  // SKIP_PAYMENTS=true: no wallet client is created, so no phase can sign a payment.
+  const canSign = !!config.privateKey && !config.skipPayments;
+  const x402ok = canSign ? initX402(config.privateKey) : false;
+  const mppok = canSign ? initMPP(config.privateKey) : false;
+  if (canSign) initMPP(config.privateKey, { legacy: true });
   console.log(`  x402 wallet: ${x402ok ? getWalletAddress() : 'NONE'}`);
   console.log(`  MPP client:  ${mppok ? 'ready' : 'NONE'}\n`);
 
@@ -110,14 +112,14 @@ async function main() {
   if (config.phaseEnabled(12)) await phase12(scorer, config, context);
   if (config.phaseEnabled(13)) await phase13(scorer, config, context);
   if (config.phaseEnabled(14)) await phase14(scorer, config, context);
-  if (config.phaseEnabled(15)) await phase15(scorer, config, context);
   if (config.phaseEnabled(16)) await phase16(scorer, config, context);
   if (config.phaseEnabled(17)) await phase17(scorer, config, context);
-  if (config.phaseEnabled(18)) {
+  if (config.phaseEnabled(18)) await phase18(scorer, config, context);
+  if (config.phaseEnabled(19)) {
     // Cooldown before CDP tests — rate limit (300 req/15min) exhausted after P0-P17 scans
     console.log('\n  (15s cooldown before CDP facilitator tests...)');
     await new Promise(r => setTimeout(r, 15000));
-    await phase18(scorer, config, context);
+    await phase19(scorer, config, context);
   }
   if (config.phaseEnabled(20)) await phase20(scorer, config, context);
   if (config.phaseEnabled(21)) await phase21(scorer, config, context);

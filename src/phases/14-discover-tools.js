@@ -1,20 +1,14 @@
 /**
- * Phase 14 — discover_tools Category & Search Tests
- * Tests the MCP discover_tools prompt for progressive tool discovery.
- * Validates category enumeration, keyword search, stemming, abuse handling.
+ * Phase 14 — Tool discovery
+ * Primary path: the `apibase.discover` tool (MCP tools/call) and GET /api/v1/discover.
+ * Backward-compatibility path: the MCP `discover_tools` prompt (category
+ * enumeration, keyword search, stemming, abuse handling).
  */
 const { mcpRequest } = require('../lib/mcp-client');
+const { sf, drain } = require('../lib/http');
 
 const PHASE = 'P14';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-const EXPECTED_CATEGORIES = {
-  business: 6, crypto: 30, developer: 32, education: 11,
-  entertainment: 44, finance: 26, health: 30, infrastructure: 15,
-  jobs: 6, legal: 8, location: 21, marketing: 11, media: 14,
-  messaging: 10, news: 8, search: 9, social: 9, space: 10,
-  travel: 17, weather: 11, world: 17,
-};
 
 function getDiscoverText(body) {
   return body?.result?.messages?.[0]?.content?.text ?? '';
@@ -48,7 +42,27 @@ module.exports = async function phase14(scorer, config, context) {
   await sleep(300);
 
   // ══════════════════════════════════════════════════════════════
-  //  1. No-args call — Category Index
+  //  0. Primary path — apibase.discover tool + GET /api/v1/discover
+  // ══════════════════════════════════════════════════════════════
+  console.log('  --- apibase.discover (primary) ---');
+  const toolRes = await mcpRequest(mcpUrl, 'tools/call', {
+    name: 'apibase.discover', arguments: { intent: 'flights' },
+  }, sid, config.apiKey);
+  const toolContent = toolRes.body?.result?.content?.[0]?.text ?? '';
+  let toolResults = [];
+  try { const j = JSON.parse(toolContent); toolResults = (j.data || j).results || []; } catch { /* not JSON */ }
+  scorer.rec(PHASE, '14.0a apibase.discover tool', '>=1 result', toolResults.length,
+    toolRes.status === 200 && toolResults.length > 0, toolContent.slice(0, 80));
+  const restRes = await sf(`${config.apiUrl}/discover?intent=flights`);
+  let restResults = [];
+  if (restRes.status === 200) { try { restResults = (await restRes.json()).results || []; } catch { /* not JSON */ } }
+  else await drain(restRes);
+  scorer.rec(PHASE, '14.0b GET /api/v1/discover', '200 + results', `${restRes.status} / ${restResults.length}`,
+    restRes.status === 200 && restResults.length > 0);
+  await sleep(200);
+
+  // ══════════════════════════════════════════════════════════════
+  //  1. Backward compatibility — discover_tools prompt, no-args category index
   // ══════════════════════════════════════════════════════════════
   console.log('  --- Category index ---');
   const indexRes = await discover(mcpUrl, sid, config.apiKey, {});
@@ -57,19 +71,25 @@ module.exports = async function phase14(scorer, config, context) {
   scorer.rec(PHASE, '14.1 No-args → catalog', 'categories', hasCategories ? 'yes' : 'no',
     hasCategories, indexText.slice(0, 80));
 
-  // Count categories in response
-  const catMatches = indexText.match(/- \w+: \d+ tools/g) || [];
-  scorer.rec(PHASE, '14.1b Category count', '>=20', catMatches.length,
-    catMatches.length >= 20, `found ${catMatches.length} categories`);
+  // Category count must equal categories_count from /.well-known/mcp.json (no literal)
+  const catMatches = indexText.match(/- [\w-]+: \d+ tools/g) || [];
+  const categoryNames = catMatches.map(m => m.slice(2, m.indexOf(':')));
+  let expectedCats = null;
+  const wk = await sf(`${config.apiBaseUrl}/.well-known/mcp.json`);
+  if (wk.status === 200) { try { expectedCats = (await wk.json()).categories_count; } catch { /* not JSON */ } }
+  else await drain(wk);
+  scorer.rec(PHASE, '14.1b Category count', `categories_count=${expectedCats}`, categoryNames.length,
+    typeof expectedCats === 'number' && categoryNames.length === expectedCats,
+    `prompt lists ${categoryNames.length}, mcp.json says ${expectedCats}`);
   await sleep(200);
 
   // ══════════════════════════════════════════════════════════════
-  //  2. Category Enumeration — all 21 categories
+  //  2. Category enumeration — every category the index lists
   // ══════════════════════════════════════════════════════════════
-  console.log('  --- Category enumeration (21) ---');
+  console.log(`  --- Category enumeration (${categoryNames.length}) ---`);
   let catPass = 0, catFail = 0;
 
-  for (const [cat, expectedCount] of Object.entries(EXPECTED_CATEGORIES)) {
+  for (const cat of categoryNames) {
     const res = await discover(mcpUrl, sid, config.apiKey, { category: cat });
     const text = getDiscoverText(res.body);
     const hasHeader = text.toLowerCase().includes(`tools in "${cat}"`);
@@ -78,11 +98,11 @@ module.exports = async function phase14(scorer, config, context) {
 
     if (hasHeader && hasTools) { catPass++; } else { catFail++; }
     scorer.recQ(PHASE, `14.2 cat:${cat}`, `header+tools`, hasHeader && hasTools ? 'ok' : 'fail',
-      hasHeader && hasTools, `lines=${toolLines} expected~${expectedCount}`);
+      hasHeader && hasTools, `lines=${toolLines}`);
     await sleep(150);
   }
-  scorer.rec(PHASE, '14.2 Category enumeration', '21/21',
-    `${catPass}/${catPass + catFail}`, catFail === 0, `${catFail} failures`);
+  scorer.rec(PHASE, '14.2 Category enumeration', `${categoryNames.length}/${expectedCats}`,
+    `${catPass}/${catPass + catFail}`, catFail === 0 && catPass === expectedCats, `${catFail} failures`);
 
   // ══════════════════════════════════════════════════════════════
   //  3. Category + Task Combos
@@ -300,7 +320,7 @@ module.exports = async function phase14(scorer, config, context) {
   console.log('  --- Consistency ---');
 
   // Each category from catalog should work as filter
-  const catNames = Object.keys(EXPECTED_CATEGORIES);
+  const catNames = categoryNames;
   let consistPass = 0;
   for (const cat of catNames.slice(0, 5)) { // spot check 5
     const res = await discover(mcpUrl, sid, config.apiKey, { category: cat });

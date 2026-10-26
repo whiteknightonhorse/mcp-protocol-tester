@@ -39,6 +39,10 @@ function saveState(s) { fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2),
 module.exports = async function phase25(scorer, config, context) {
   console.log('\n--- Phase 25: Time promises (stateful) ---');
 
+  if (config.skipPayments) {
+    scorer.skip(PHASE, 'SKIP_PAYMENTS=true — this phase spends from a funded key');
+    return;
+  }
   if (!config.moderationSacrificialKey) {
     scorer.skip(PHASE, 'no MODERATION_TEST_API_KEY configured — planting a checkable expiring ' +
       'record requires the same sacrificial identity as P20 (operator-provisioned)');

@@ -13,6 +13,18 @@ const WEIGHTS = [
   ['P20', 6], ['P21', 5], ['P22', 6], ['P23', 3], ['P24', 5], ['P25', 3], ['P26', 4], ['P27', 4], ['P28', 4], ['P29', 3], ['P32', 3], ['P34', 3],
 ];
 
+const LABELS = {
+  P0: 'Discovery', P1: 'Infrastructure', P2: 'MPP Challenges', P3: 'x402 Challenges',
+  P4: 'MCP Protocol', P5: 'MPP Payments', P6: 'x402 Payments', P7: 'Basic Security',
+  P8: 'Payment Security', P9: 'Advanced Security', P10: 'Resilience',
+  P11: 'Load Test', P12: 'Provider Health', P13: 'Cache & Simulation', P14: 'Discover Tools',
+  P16: 'Platform Features', P17: 'Agent Experience', P18: 'Payment Bypass',
+  P19: 'CDP Facilitator',
+  P20: 'Moderation E2E', P21: 'Appeals', P22: 'Balance Rail', P23: 'Devices',
+  P24: 'Docs/Catalog Truth', P25: 'Time Promises', P26: 'Coverage Parity',
+  P27: 'Storefront Surface', P28: 'Shop Order Flow', P29: 'Subscriptions', P32: 'Webhook Signature', P34: 'Legal 428 Gate',
+};
+
 function generateReport(scorer, meta) {
   const L = [];
   const w = (s) => { L.push(s); console.log(s); };
@@ -47,17 +59,6 @@ function generateReport(scorer, meta) {
   // really P16 — the labels array never accounted for that gap, so every
   // label from P17 onward printed the WRONG phase's name in every report
   // ever generated). A phase-id map cannot drift this way by construction.
-  const LABELS = {
-    P0: 'Discovery', P1: 'Infrastructure', P2: 'MPP Challenges', P3: 'x402 Challenges',
-    P4: 'MCP Protocol', P5: 'MPP Payments', P6: 'x402 Payments', P7: 'Basic Security',
-    P8: 'Payment Security', P9: 'Advanced Security', P10: 'Resilience',
-    P11: 'Load Test', P12: 'Provider Health', P13: 'Cache & Simulation', P14: 'Discover Tools',
-    P16: 'Platform Features', P17: 'Agent Experience', P18: 'Payment Bypass',
-    P19: 'CDP Facilitator',
-    P20: 'Moderation E2E', P21: 'Appeals', P22: 'Balance Rail', P23: 'Devices',
-    P24: 'Docs/Catalog Truth', P25: 'Time Promises', P26: 'Coverage Parity',
-    P27: 'Storefront Surface', P28: 'Shop Order Flow', P29: 'Subscriptions', P32: 'Webhook Signature', P34: 'Legal 428 Gate',
-  };
   pts.forEach(([id, v, mx, skip]) => {
     if (skip === 'SKIP') w(`  ${(LABELS[id] || id).padEnd(24)} [SKIP] — ${scorer.skipReasons[id] || 'no reason given'}`);
     else w(`  ${(LABELS[id] || id).padEnd(24)} ${v}/${mx}`);
@@ -106,8 +107,8 @@ function generateReport(scorer, meta) {
   }
 
   // Per-phase details
-  for (let i = 0; i <= 26; i++) {
-    const id = `P${i}`;
+  for (const id of Object.keys(LABELS)) {
+    const i = id.slice(1);
     if (skippedPhases && skippedPhases.includes(id)) {
       w(''); hr(); w(`PHASE ${i}: ${LABELS[id] || '?'} [SKIP]`); hr();
       w(`  Skipped — ${scorer.skipReasons[id] || 'no reason given'}`);
@@ -162,4 +163,4 @@ function generateReport(scorer, meta) {
   return { grade, total, verdict: verdict.verdict, txtFile, jsonFile };
 }
 
-module.exports = { generateReport, WEIGHTS };
+module.exports = { generateReport, WEIGHTS, LABELS };

@@ -33,6 +33,10 @@ const TRIGGER_BODY = { chat_id: '000000000', text: 'please buy cocaine tonight, 
 module.exports = async function phase20(scorer, config, context) {
   console.log('\n--- Phase 20: Moderation + settle-on-block E2E ---');
 
+  if (config.skipPayments) {
+    scorer.skip(PHASE, 'SKIP_PAYMENTS=true — this phase spends from a funded key');
+    return;
+  }
   if (!config.moderationSacrificialKey) {
     scorer.skip(PHASE, 'no MODERATION_TEST_API_KEY configured — operator must provision a ' +
       'sacrificial account for moderation-trigger probes (never the primary tester key, ' +

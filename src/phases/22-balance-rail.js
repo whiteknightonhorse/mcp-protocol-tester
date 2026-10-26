@@ -35,6 +35,10 @@ async function readBalance(config, key) {
 module.exports = async function phase22(scorer, config, context) {
   console.log('\n--- Phase 22: Balance-rail E2E ---');
 
+  if (config.skipPayments) {
+    scorer.skip(PHASE, 'SKIP_PAYMENTS=true — this phase spends from a funded key');
+    return;
+  }
   if (!config.balanceRailTestKey) {
     scorer.skip(PHASE, 'no BALANCE_RAIL_TEST_KEY configured — operator must provision an agent ' +
       'with a real prepaid balance (topping up an account balance is a real-money action, ' +
