@@ -250,11 +250,12 @@ async function eraChecks(scorer, config, url, sid, apiKey, context) {
   // 4.E5 — free tool, client without elicitation capability. No payment.
   try {
     const names = new Set((context.mcpToolNames || []));
-    const fromCatalog = (context.catalog || []).find((t) => !((t.input_schema?.required?.length) > 0)
-      && !(parseFloat(t.pricing?.price_usd ?? t.price_usd ?? '0') > 0) && names.has(t.id));
-    // Almost every MCP tool is priced and platform.* tools are not in the MCP list, so the fallback is an
-    // UNPAID call to a paid tool: the server answers with a payment challenge, nothing is ever settled.
-    const free = fromCatalog || (names.has(MCP_PAID_TOOL.mcp) ? { id: MCP_PAID_TOOL.mcp } : null);
+    // Free platform tools with no required args, by MCP name (REST catalog ids differ from MCP names).
+    const FREE_MCP_TOOLS = ['platform.quality.rankings', 'apibase.discovery.search', 'account.analytics.usage'];
+    const fromCatalog = FREE_MCP_TOOLS.find((n) => names.has(n));
+    // Fallback when none is listed: an UNPAID call to a paid tool; the server answers with a payment
+    // challenge, nothing is ever settled.
+    const free = fromCatalog ? { id: fromCatalog } : (names.has(MCP_PAID_TOOL.mcp) ? { id: MCP_PAID_TOOL.mcp } : null);
     if (!free) {
       scorer.blocked(PHASE, '4.E5 headless safety', 'no-free-tool', 'no free tool without required args in the MCP tool list');
     } else {
