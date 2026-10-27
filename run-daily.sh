@@ -102,17 +102,24 @@ Full log: reports/daily-${TIMESTAMP}.log on the tester box.
     # open a fresh GitHub issue every single day — issue is a journal, not
     # a per-run event. Reuse the existing open [Auto-Test] issue if there
     # is one; only open a new one otherwise.
-    EXISTING_ISSUE=$(gh issue list --repo whiteknightonhorse/APIbase \
+    # T-0581: operational issues go to the private repo; body scrubbed by the fleet helper (fail-closed: no scrub, no issue).
+    OPS_LIB="${APIBASE_ROOT:-/home/apibase/apibase}/scripts/lib/ops-issues.sh"
+    if [ -r "$OPS_LIB" ] && source "$OPS_LIB" && ISSUE_BODY="$(printf '%s' "${ISSUE_BODY}" | ops_redact)"; then
+    EXISTING_ISSUE=$(gh issue list --repo "$OPS_ISSUES_REPO" \
       --search "[Auto-Test] in:title" --state open --json number --jq '.[0].number' 2>>"$LOG")
     if [ -n "$EXISTING_ISSUE" ]; then
-      gh issue comment "$EXISTING_ISSUE" --repo whiteknightonhorse/APIbase --body "${ISSUE_BODY}" \
+      gh issue comment "$EXISTING_ISSUE" --repo "$OPS_ISSUES_REPO" --body "${ISSUE_BODY}" \
         >> "$LOG" 2>&1 || echo "[$(date +%Y%m%d_%H%M%S)] Failed to comment on issue #${EXISTING_ISSUE}" >> "$LOG"
     else
       gh issue create \
-        --repo whiteknightonhorse/APIbase \
+        --repo "$OPS_ISSUES_REPO" \
         --title "${ISSUE_TITLE}" \
         --body "${ISSUE_BODY}" \
         >> "$LOG" 2>&1 || echo "[$(date +%Y%m%d_%H%M%S)] Failed to create GitHub issue" >> "$LOG"
+    fi
+    else
+      echo "[$(date +%Y%m%d_%H%M%S)] ops-issues helper missing or redaction failed — issue NOT filed" >> "$LOG"
+      notify "[apibase tester] ⚠️ run-daily.sh: ops issue not filed (ops-issues helper missing or redaction failed)."
     fi
   else
     echo "[$(date +%Y%m%d_%H%M%S)] All good — no alert needed (score=${SCORE}, verdict=${VERDICT})" >> "$LOG"

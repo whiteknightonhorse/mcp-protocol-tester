@@ -7,6 +7,7 @@ const { sf, drain, getDelay, withTesterHeader } = require('../lib/http');
 const { getMppClient } = require('../lib/mpp-client');
 const { TX_HASH_RE, obtainCredential, sendWithCredential, chargeOnce, runMppxValidate } = require('../lib/mpp-pay');
 const { getBody } = require('../utils/assert');
+const { walletPreflight } = require('../lib/wallet-balance');
 
 const PHASE = 'P5';
 
@@ -27,6 +28,8 @@ const PAYMENT_TOOLS = [
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+const hasBalanceEvidence = (text) => /insufficientbalance/i.test(text || '');
+
 module.exports = async function phase5(scorer, config, context) {
   console.log('\n--- Phase 5: MPP Payments ---');
 
@@ -41,6 +44,13 @@ module.exports = async function phase5(scorer, config, context) {
     return;
   }
 
+  // T-0602: free balance pre-flight; a known-short Tempo balance is BLOCKED before any charge.
+  const pre = await walletPreflight(config, 'tempo');
+  if (pre.short) {
+    scorer.blocked(PHASE, 'mpp-payment-summary', 'wallet-empty', `${pre.short}; fund the test wallet on Tempo`);
+    return;
+  }
+
   // Use proven external tools, not catalog.slice() which may hit internal services
   const tools = PAYMENT_TOOLS.filter(t => context.catalog.some(c => (c.id || c.name) === t.id));
 
@@ -50,8 +60,6 @@ module.exports = async function phase5(scorer, config, context) {
   // rail is dead/misconfigured" were indistinguishable. BLOCKED(no-funds)
   // is now the ONLY escape from FAIL, and only when there is live evidence
   // of an empty wallet — never a blanket "SDK failed" excuse.
-  const hasBalanceEvidence = (text) => /insufficientbalance/i.test(text || '');
-
   for (const tool of tools) {
     const id = tool.id;
     const url = `${config.apiUrl}/tools/${id}/call`;
@@ -170,6 +178,9 @@ module.exports = async function phase5(scorer, config, context) {
 
 const LANE_TOOL = { id: 'earthquake.feed', body: {} };
 
+// T-0602: live InsufficientBalance evidence in a charge result or exception.
+const chargeEvidence = (r) => (!r.ok ? r.error : r.status !== 200 ? JSON.stringify(r.json || '') : '') || '';
+
 async function clientLanes(scorer, config, context) {
   const cur = getMppClient(false);
   const legacy = getMppClient(true);
@@ -179,6 +190,18 @@ async function clientLanes(scorer, config, context) {
   const base = { 'Content-Type': 'application/json' };
   const bearer = key ? { Authorization: `Bearer ${key}`, 'X-API-Key': key } : {};
   const budgetLeft = () => context.spentMPP < config.maxBudget;
+  // Only live InsufficientBalance evidence turns a failed charge into BLOCKED(wallet-empty); anything else stays a failure.
+  const blockedByBalance = (name, text) => {
+    if (!hasBalanceEvidence(text)) return false;
+    scorer.blocked(PHASE, name, 'wallet-empty', `InsufficientBalance evidence: ${String(text).slice(0, 100)}`);
+    return true;
+  };
+  const N0 = '5.N mppx 0.13.5 client pays one tool';
+  const N1 = '5.N+1 legacy mppx 0.8.19 client pays one tool';
+  const N2 = '5.N+2 settled credential replay is refused';
+  const N2b = '5.N+2b settled credential replay is a final 403';
+  const N3 = '5.N+3 Payment-Authorization credential + Bearer API key';
+  let walletEmptyAt5N = false;
 
   // 5.N current client (mppx 0.13.x): 200 + Payment-Receipt + tx-hash reference.
   let settled = null;
@@ -186,18 +209,21 @@ async function clientLanes(scorer, config, context) {
     if (!cur) throw new Error('current mppx client not initialized');
     if (!budgetLeft()) throw new Error('budget exhausted');
     const r = await chargeOnce(cur, url, { ...base, ...bearer }, body);
-    if (!r.ok) {
-      scorer.redRec(PHASE, '5.N mppx 0.13.5 client pays one tool', '200 + Payment-Receipt (tx hash)', r.error, false);
+    if (blockedByBalance(N0, chargeEvidence(r))) {
+      walletEmptyAt5N = true;
+    } else if (!r.ok) {
+      scorer.redRec(PHASE, N0, '200 + Payment-Receipt (tx hash)', r.error, false);
     } else {
       const refOk = typeof r.receipt?.reference === 'string' && TX_HASH_RE.test(r.receipt.reference);
       const ok = r.status === 200 && !!r.receipt && refOk;
       context.spentMPP += r.costUsd;
-      scorer.redRec(PHASE, '5.N mppx 0.13.5 client pays one tool', '200 + Payment-Receipt (tx hash)',
+      scorer.redRec(PHASE, N0, '200 + Payment-Receipt (tx hash)',
         `${r.status} receipt=${!!r.receipt} txhash=${refOk}`, ok, `cost=$${r.costUsd.toFixed(6)}`);
       if (r.status === 200) settled = r;
     }
   } catch (e) {
-    scorer.recCatch(PHASE, '5.N mppx 0.13.5 client pays one tool', '200', e);
+    if (blockedByBalance(N0, e.message)) walletEmptyAt5N = true;
+    else scorer.recCatch(PHASE, N0, '200', e);
   }
   await sleep(getDelay(LANE_TOOL.id));
 
@@ -206,15 +232,17 @@ async function clientLanes(scorer, config, context) {
     if (!legacy) throw new Error('legacy mppx client not initialized');
     if (!budgetLeft()) throw new Error('budget exhausted');
     const r = await chargeOnce(legacy, url, { ...base, ...bearer }, body);
-    if (!r.ok) {
-      scorer.rec(PHASE, '5.N+1 legacy mppx 0.8.19 client pays one tool', '200', r.error, false);
+    if (blockedByBalance(N1, chargeEvidence(r))) {
+      // recorded as BLOCKED
+    } else if (!r.ok) {
+      scorer.rec(PHASE, N1, '200', r.error, false);
     } else {
       context.spentMPP += r.costUsd;
       scorer.rec(PHASE, '5.N+1 legacy mppx 0.8.19 client pays one tool', '200', String(r.status),
         r.status === 200, `cost=$${r.costUsd.toFixed(6)} receipt=${!!r.receipt}`);
     }
   } catch (e) {
-    scorer.recCatch(PHASE, '5.N+1 legacy mppx 0.8.19 client pays one tool', '200', e);
+    if (!blockedByBalance(N1, e.message)) scorer.recCatch(PHASE, N1, '200', e);
   }
   await sleep(getDelay(LANE_TOOL.id));
 
@@ -238,6 +266,10 @@ async function clientLanes(scorer, config, context) {
     } catch (e) {
       scorer.recCatch(PHASE, '5.N+2 settled credential replay is a final 403', '403', e);
     }
+  } else if (walletEmptyAt5N) {
+    const why = '5.N was BLOCKED(wallet-empty): no credential settled, replay cannot be exercised';
+    scorer.blocked(PHASE, N2, 'wallet-empty', why);
+    scorer.blocked(PHASE, N2b, 'wallet-empty', why);
   } else {
     scorer.rec(PHASE, '5.N+2 settled credential replay is a final 403', '403 credential_replayed', 'no settled credential', false,
       'the 0.13.5 charge above did not settle, replay cannot be exercised');
@@ -249,15 +281,17 @@ async function clientLanes(scorer, config, context) {
     if (!cur || !key) throw new Error('no client or API key');
     if (!budgetLeft()) throw new Error('budget exhausted');
     const r = await chargeOnce(cur, url, { ...base, Authorization: `Bearer ${key}` }, body, 'Payment-Authorization');
-    if (!r.ok) {
-      scorer.rec(PHASE, '5.N+3 Payment-Authorization credential + Bearer API key', '200', r.error, false);
+    if (blockedByBalance(N3, chargeEvidence(r))) {
+      // recorded as BLOCKED
+    } else if (!r.ok) {
+      scorer.rec(PHASE, N3, '200', r.error, false);
     } else {
       context.spentMPP += r.costUsd;
       scorer.rec(PHASE, '5.N+3 Payment-Authorization credential + Bearer API key', '200', String(r.status), r.status === 200,
         `cost=$${r.costUsd.toFixed(6)}`);
     }
   } catch (e) {
-    scorer.recCatch(PHASE, '5.N+3 Payment-Authorization credential + Bearer API key', '200', e);
+    if (!blockedByBalance(N3, e.message)) scorer.recCatch(PHASE, N3, '200', e);
   }
   await sleep(300);
 

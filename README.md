@@ -163,6 +163,9 @@ more once the sacrificial-key phases are provisioned).
 | `E2E_SHOP_PAID`   | No       | unset                               | `true` lets P35 spend (needs `SKIP_PAYMENTS=false`); anything else: P35 runs quote and cancel only |
 | `E2E_SHOP_SLUG`   | No       | `apibase-demo`                      | Merchant slug the shop phases (P28, P29, P35) target |
 | `E2E_MERCHANT_KEY`| No       | (none)                              | Reserved for the future webhook-delivery card; no phase reads it today |
+| `TERMS_TEST_SHOP_SLUG` | No  | `tester-terms-pending`              | Never-activated fixture merchant P34.2 probes for the 428 terms gate; registered once by the tester wallet if missing, never activated |
+| `TERMS_TEST_CONTACT_EMAIL` | No | `tester-terms-pending@apibase.pro` | Contact e-mail used only when P34 registers the fixture merchant |
+| `WALLET_FLOOR_USD` | No      | `1.50`                              | P5/P6 print `wallet-balance:` for both rails and warn below this floor; below the per-run need (0.035 Tempo, 0.030 Base) the phase is BLOCKED(wallet-empty) |
 
 > \* `PRIVATE_KEY` is required by every phase whose Cost column is not $0. The same key works on both Base and Tempo chains.
 

@@ -2,30 +2,23 @@
  * Phase 34 — Legal registry integrity + terms-gate 428 contract (T-0348).
  *
  * 34.1 /legal/index.json sha256 values must match the bytes actually served.
- * 34.2 (T-0563: the probe shop opus-test-shop is deactivated and answers 410 merchant_unavailable before the
- *      terms gate; the 428 body check is BLOCKED while that holds.) A merchant that has not accepted the current documents is refused on a
- *      gated path (quote creation) with a machine-readable 428.
- *
- * Correction to the card text, found by reading src/shop/auth/terms.guard.ts:
- * a missing acceptance only becomes a 428 once the document is OVERDUE, i.e.
- * more than 30 days past its effective_from (REACCEPT_WINDOW_MS). Inside the
- * window the gate lets the call through and only attaches a
- * terms_update_pending banner. The registry bumped to 1.2 on 2026-10-12, so
- * the test shop (still on 1.1) cannot return 428 before 2026-11-11. The probe
- * therefore derives the expected outcome from the live index: before the
- * window closes it asserts the gate is NOT refusing (and says when the 428
- * becomes reachable); afterwards it requires the 428 contract. The probe is a
- * quote for a nonexistent SKU: the gate runs first, nothing is created, and
- * no order or paid provider call is possible.
+ * 34.2 (T-0602) A merchant in status `pending` (never activated) is refused on a gated path (quote creation)
+ *      with a machine-readable 428 terms_not_accepted whose docs[] equal the live index (src/shop/auth/terms.guard.ts:
+ *      a pending merchant is refused regardless of the 30-day window). The fixture merchant TERMS_TEST_SHOP_SLUG
+ *      (default tester-terms-pending) is registered once by the tester wallet and never accepted/verified/activated
+ *      (src/lib/terms-fixture.js); if registration needs input the tester lacks the check is BLOCKED(fixture-missing).
+ *      T-0563: the deactivated opus-test-shop answers 410 merchant_unavailable before the terms gate, kept as its own
+ *      line, as is the apibase-demo control. The probe is a quote for a nonexistent SKU: nothing is created and no
+ *      order or paid provider call is possible.
  */
 const { createHash } = require('crypto');
 const { sf } = require('../lib/http');
+const { ensureTermsFixture, quoteProbe } = require('../lib/terms-fixture');
 
 const PHASE = 'P34';
-const WINDOW_MS = 30 * 24 * 3600 * 1000;
-const UNACCEPTED_SLUG = process.env.TERMS_TEST_SHOP_SLUG || 'opus-test-shop';
+const FIXTURE_SLUG = process.env.TERMS_TEST_SHOP_SLUG || 'tester-terms-pending';
+const DEACTIVATED_SLUG = 'opus-test-shop';
 const ACCEPTED_SLUG = 'apibase-demo';
-const BOGUS_SKU = 'tester-p34-nonexistent-sku';
 
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 
@@ -46,17 +39,6 @@ function check428Body(body, index) {
     else if (ref.sha256 !== d.sha256 || ref.version !== d.version) bad.push(`docs[] ${d.doc_id} disagrees with the index`);
   }
   return bad;
-}
-
-async function quoteProbe(config, slug) {
-  const r = await sf(`${config.apiUrl}/shop/quotes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ merchant: slug, items: [{ sku: BOGUS_SKU, qty: 1 }] }),
-  });
-  let body = null;
-  try { body = await r.json(); } catch { /* not JSON */ }
-  return { status: r.status, body };
 }
 
 module.exports = async function phase34(scorer, config) {
@@ -95,31 +77,37 @@ module.exports = async function phase34(scorer, config) {
 
   // 34.2 — the gate.
   try {
-    const registry = index.filter((d) => d.registry !== false && d.effective_from);
-    const now = Date.now();
-    const overdue = registry.filter((d) => now - Date.parse(d.effective_from) > WINDOW_MS);
-
     const demo = await quoteProbe(config, ACCEPTED_SLUG);
     scorer.rec(PHASE, `34.2 control: ${ACCEPTED_SLUG} (accepted) is not gated`, 'not 428/410',
       String(demo.status), demo.status !== 428 && demo.status !== 410);
 
-    const t = await quoteProbe(config, UNACCEPTED_SLUG);
     // T-0563: opus-test-shop is deactivated; the live answer is 410 merchant_unavailable, and that gate
     // runs before the terms gate, so the 428 contract is not reachable through this shop.
-    const gone = t.status === 410;
-    scorer.rec(PHASE, `34.2 ${UNACCEPTED_SLUG} deactivated shop is refused with 410 merchant_unavailable`, '410 merchant_unavailable',
-      `${t.status} ${t.body?.error_code || '(no error_code)'}`, gone && t.body?.error_code === 'merchant_unavailable',
+    const t = await quoteProbe(config, DEACTIVATED_SLUG);
+    scorer.rec(PHASE, `34.2 ${DEACTIVATED_SLUG} deactivated shop is refused with 410 merchant_unavailable`, '410 merchant_unavailable',
+      `${t.status} ${t.body?.error_code || '(no error_code)'}`, t.status === 410 && t.body?.error_code === 'merchant_unavailable',
       'the deactivated-merchant gate answers before the terms gate');
-    if (overdue.length > 0 && gone) {
-      scorer.blocked(PHASE, `34.2 ${UNACCEPTED_SLUG} without current acceptance -> 428 machine-readable`, 'merchant-deactivated',
-        `overdue docs: ${overdue.map((d) => d.doc_id).join(', ')}; the probe shop answers 410 before the terms gate, so the 428 body cannot be checked`);
-    } else if (overdue.length > 0) {
-      const bad = t.status === 428 ? check428Body(t.body, index) : [`status ${t.status}`];
-      scorer.redRec(PHASE, `34.2 ${UNACCEPTED_SLUG} without current acceptance -> 428 machine-readable`, '428 + docs[] matching index',
-        t.status === 428 && bad.length === 0 ? '428 ok' : bad.join('; '), t.status === 428 && bad.length === 0,
-        `overdue docs: ${overdue.map((d) => d.doc_id).join(', ')}`);
+
+    // T-0602: the 428 contract, every day, against the never-activated (pending) fixture merchant.
+    const name = `34.2 ${FIXTURE_SLUG} pending merchant -> 428 machine-readable`;
+    const fx = await ensureTermsFixture(config, FIXTURE_SLUG);
+    if (fx.state === 'missing') {
+      scorer.blocked(PHASE, name, 'fixture-missing', `missing input: ${fx.missing}; ${fx.detail}`);
+      return;
     }
+    const f = await quoteProbe(config, FIXTURE_SLUG);
+    const want = index.filter((d) => d.registry !== false && Date.parse(d.effective_from) <= Date.now());
+    const key = (d) => `${d.doc_id}@${d.version}#${d.sha256}`;
+    const bad = f.status === 428 ? check428Body(f.body, index) : [`status ${f.status}`];
+    if (f.status === 428 && bad.length === 0) {
+      const got = (f.body.docs || []).map(key).sort().join(',');
+      const exp = want.map(key).sort().join(',');
+      if (got !== exp) bad.push(`docs[] ${got} != live index ${exp}`);
+    }
+    scorer.redRec(PHASE, name, '428 + docs[] equal to the live index',
+      bad.length === 0 ? '428 ok' : bad.join('; '), bad.length === 0,
+      fx.state === 'registered' ? 'fixture registered by this run (pending, never activated)' : '');
   } catch (e) {
-    scorer.recCatch(PHASE, '34.2 terms gate', '428 or window pass-through', e);
+    scorer.recCatch(PHASE, '34.2 terms gate', '428 contract', e);
   }
 };
