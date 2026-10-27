@@ -6,6 +6,7 @@
 const { sf, drain, getDelay } = require('../lib/http');
 const { getX402Client, makeX402Payment } = require('../lib/x402-client');
 const { getBody } = require('../utils/assert');
+const { walletPreflight } = require('../lib/wallet-balance');
 
 const PHASE = 'P6';
 
@@ -37,6 +38,13 @@ module.exports = async function phase6(scorer, config, context) {
   const x402 = getX402Client();
   if (!x402) {
     scorer.rec(PHASE, 'x402-payments', 'client', 'no-client', false, 'x402 client not initialized');
+    return;
+  }
+
+  // T-0602: free balance pre-flight; a known-short Base balance is BLOCKED before any charge.
+  const pre = await walletPreflight(config, 'base');
+  if (pre.short) {
+    scorer.blocked(PHASE, 'x402-payment-summary', 'wallet-empty', `${pre.short}; fund the test wallet on Base`);
     return;
   }
 
