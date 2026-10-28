@@ -56,7 +56,9 @@ fi
 export TESTER_RUN_ID="daily-${TIMESTAMP}"
 echo "[${TIMESTAMP}] Starting daily MCP protocol test (run id ${TESTER_RUN_ID})..." >> "$LOG"
 RUN_START_MARKER=$(mktemp)
-timeout 600 node --max-old-space-size=512 src/index.js >> "$LOG" 2>&1
+# 0624: 1299 s measured (skip-payments full run) + 445 s paid-run allowance (daily-20261026) = 1744 s; x1.5 = 2616 s
+RUN_TIMEOUT_SEC=2616
+timeout "$RUN_TIMEOUT_SEC" node --max-old-space-size=512 src/index.js >> "$LOG" 2>&1
 TEST_EXIT=$?
 
 # A killed/crashed run (kill -9, OOM, timeout) must NOT be masked by a
