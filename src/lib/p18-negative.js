@@ -45,7 +45,7 @@ async function buildMutations({ base, resign, secondAddress, now = Date.now(), r
   return out;
 }
 
-const WALLET_SIGNIN = (domain, address, nonce, issuedAt) =>
-  `${domain} wants you to sign in with your wallet.\nAddress: ${address}\nPurpose: reissue\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
+const WALLET_SIGNIN = (domain, address, nonce, issuedAt, purpose = 'reissue') =>
+  `${domain} wants you to sign in with your wallet.\nAddress: ${address}\nPurpose: ${purpose}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
 
 module.exports = { OTHER_PAYTO, OTHER_ASSET, NAMES, buildMutations, flipNetwork, WALLET_SIGNIN };

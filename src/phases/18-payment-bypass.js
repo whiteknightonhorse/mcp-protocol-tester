@@ -95,45 +95,56 @@ module.exports = async function phase18(scorer, config, context) {
       scorer.rec(PHASE, '18.N1-N7 negative matrix', 'ran', 'error', false, e.message.slice(0, 80));
     }
   } else {
-    scorer.rec(PHASE, '18.N1-N7 negative matrix', 'skip', 'no wallet or SKIP_PAYMENTS', true);
+    // Not a pass: N1-N7 did not run. Reported as BLOCKED so a no-op matrix cannot read as GREEN.
+    scorer.blocked(PHASE, '18.N1-N7 negative matrix', 'not-run-no-signer', 'needs API_KEY, a wallet key and SKIP_PAYMENTS=false; N1-N7 NOT exercised');
   }
   await sleep(300);
 
   console.log('  --- wallet sign-in (N8-N10) ---');
   try {
     const { privateKeyToAccount, generatePrivateKey } = require('viem/accounts');
-    const w = privateKeyToAccount(generatePrivateKey()); // throwaway, never registered: nothing can be reissued
+    const w = privateKeyToAccount(generatePrivateKey()); // throwaway, never registered
     const origin = config.apiBaseUrl;
-    const JSON_H = { 'Content-Type': 'application/json' };
+    const slug = process.env.E2E_SHOP_SLUG || 'apibase-demo';
+    // GET /m/:slug/owner verifies the sign-in (shape, nonce GETDEL, age, signature) BEFORE it loads the
+    // merchant, so every refusal carries its own reason; a fully valid sign-in by a foreign wallet ends in 404.
     const getNonce = async () => {
-      const r = await sf(`${origin}/api/v1/shop/auth/nonce?wallet=${w.address}&purpose=reissue`);
+      const r = await sf(`${origin}/api/v1/shop/auth/nonce?wallet=${w.address}&purpose=owner`);
       const j = r.status === 200 ? await r.json() : (await drain(r), null);
       return j && j.nonce ? j : null;
     };
     const reissue = async (message) => {
       const signature = await w.signMessage({ message });
-      const r = await sf(`${origin}/api/v1/shop/merchants/me/keys/reissue`, {
-        method: 'POST', headers: JSON_H, body: JSON.stringify({ wallet: w.address, message, signature }),
+      const r = await sf(`${origin}/m/${slug}/owner`, {
+        headers: { 'X-Owner-Message': Buffer.from(message, 'utf8').toString('base64'), 'X-Owner-Signature': signature },
       });
       const t = await r.text();
-      return { status: r.status, leaked: /"api_key"/.test(t) };
+      let msg = '';
+      try { msg = String(JSON.parse(t).message || ''); } catch {}
+      return { status: r.status, msg, leaked: r.status === 200 };
     };
-    const rec = (k, results, what) => {
-      const ok = results.every(x => x.status === 401 && !x.leaked);
-      scorer.redRec(PHASE, NAMES[k], '401, no key', results.map(x => x.status).join(','), ok,
-        ok ? `${what} refused` : `CRITICAL: ${what} not refused`);
+    const rec = (k, x, wantRe, what) => {
+      const ok = x.status === 401 && wantRe.test(x.msg) && !x.leaked;
+      scorer.redRec(PHASE, NAMES[k], `401 ${wantRe.source}`, `${x.status} ${x.msg}`.slice(0, 60), ok,
+        ok ? `${what} refused` : `CRITICAL: ${what} not refused for the expected reason`);
     };
     const n8 = await getNonce();
     if (!n8) {
       for (const k of ['N8', 'N9', 'N10']) scorer.rec(PHASE, NAMES[k], 'nonce endpoint', 'no nonce', false, 'GET /api/v1/shop/auth/nonce gave no nonce');
     } else {
-      rec('N8', [await reissue(WALLET_SIGNIN('example.com', w.address, n8.nonce, n8.issued_at))], 'foreign domain');
+      rec('N8', await reissue(WALLET_SIGNIN('example.com', w.address, n8.nonce, n8.issued_at, 'owner')), /malformed sign-in message/, 'foreign domain');
       const n9 = await getNonce();
-      const m9 = n9 && n9.message;
-      if (m9) rec('N9', [await reissue(m9), await reissue(m9)].slice(1), 'second use of a nonce');
-      else scorer.rec(PHASE, NAMES.N9, 'nonce', 'none', false, 'no nonce');
+      if (n9 && n9.message) {
+        const first = await reissue(n9.message);  // valid sign-in: must get past auth (404 = this wallet owns no such shop)
+        const second = await reissue(n9.message); // same nonce again
+        if (first.status !== 404) {
+          scorer.rec(PHASE, NAMES.N9, 'valid first sign-in reaches 404', String(first.status), false, 'precondition failed: first sign-in not accepted, replay not proven');
+        } else {
+          rec('N9', second, /nonce unknown, expired or used/, 'second use of a nonce');
+        }
+      } else scorer.rec(PHASE, NAMES.N9, 'nonce', 'none', false, 'no nonce');
       const n10 = await getNonce();
-      if (n10) rec('N10', [await reissue(WALLET_SIGNIN('apibase.pro', w.address, n10.nonce, new Date(Date.now() - 600000).toISOString()))], '10-minute-old message');
+      if (n10) rec('N10', await reissue(WALLET_SIGNIN('apibase.pro', w.address, n10.nonce, new Date(Date.now() - 600000).toISOString(), 'owner')), /expired/, '10-minute-old message');
       else scorer.rec(PHASE, NAMES.N10, 'nonce', 'none', false, 'no nonce');
     }
   } catch (e) {

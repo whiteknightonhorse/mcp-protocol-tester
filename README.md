@@ -134,6 +134,8 @@ One numbering: file prefix = `PHASES` value = report label. The table below and 
 | P35 | Shop Paid E2E | $0.02-0.05 |
 
 Phases that can spend (Cost not $0): P4, P5, P6, P8, P18, P20, P22, P25, P35. What each phase tests, its file and weight: [docs/PHASES.md](docs/PHASES.md).
+
+P18 now carries 19 checks (9 older ones plus the x402 negative matrix 18.N1-18.N10: payTo, asset, network, validity window, signer and signature mutations, and wallet sign-in domain, nonce replay and age). Cost is unchanged (~$0.01, only the one valid flow spends); every N-check must be refused, and a 200 is RED. Details: [docs/PHASES.md](docs/PHASES.md).
 <!-- phases:end -->
 
 The moderation, balance and device phases (P20, P22, P23, P25) need an operator-provisioned
