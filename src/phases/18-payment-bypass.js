@@ -5,7 +5,9 @@
  */
 const { sf, drain, diffTransportProbe, curlRawPath } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
-const { getX402Client, makeX402Payment } = require('../lib/x402-client');
+const { getX402Client, makeX402Payment, makeX402PaymentPayload, getX402HttpClient } = require('../lib/x402-client');
+const { buildMutations, NAMES, WALLET_SIGNIN } = require('../lib/p18-negative');
+const { readRail } = require('../lib/wallet-balance');
 
 const PHASE = 'P18';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -28,6 +30,116 @@ module.exports = async function phase18(scorer, config, context) {
       secondKey = rd.api_key || rd.apiKey;
     } else { await drain(regRes); }
   } catch {}
+
+  // ══════════════════════════════════════════════════════════════
+  //  T-0653: x402 facilitator negative matrix N1..N7 + sign-in N8..N10
+  //  Every payload below MUST be refused; a 200 or a USDC transfer is RED and stops the matrix (V4).
+  // ══════════════════════════════════════════════════════════════
+  console.log('  --- x402 negative matrix (N1-N7) ---');
+  const nx402 = getX402Client();
+  if (nx402 && config.apiKey && config.privateKey && !config.skipPayments) {
+    try {
+      const { privateKeyToAccount, generatePrivateKey } = require('viem/accounts');
+      const acct = privateKeyToAccount(config.privateKey);
+      const second = privateKeyToAccount(generatePrivateKey());
+      const paid = (context.catalog || [])
+        .filter(t => parseFloat(t.pricing?.price_usd || '0') > 0)
+        .sort((a, b) => parseFloat(a.pricing.price_usd) - parseFloat(b.pricing.price_usd));
+      const toolId = (paid[0]?.id || 'crypto.trending');
+      const callUrl = `${config.apiUrl}/tools/${toolId}/call`;
+      const ch = await sf(callUrl, { method: 'POST', headers: AUTH, body: '{}' });
+      if (ch.status !== 402) {
+        await drain(ch);
+        scorer.rec(PHASE, '18.N0 challenge', '402', ch.status, false, 'no 402 challenge for the negative matrix');
+      } else {
+        const body402 = await ch.json();
+        const base = await makeX402PaymentPayload(body402);
+        const resign = (accepted, a) => acct.signTypedData({
+          domain: {
+            name: accepted.extra?.name || 'USD Coin', version: accepted.extra?.version || '2',
+            chainId: Number(String(accepted.network).split(':')[1]), verifyingContract: accepted.asset,
+          },
+          types: { TransferWithAuthorization: [
+            { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+            { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' } ] },
+          primaryType: 'TransferWithAuthorization',
+          message: { from: a.from, to: a.to, value: BigInt(a.value), validAfter: BigInt(a.validAfter), validBefore: BigInt(a.validBefore), nonce: a.nonce },
+        });
+        const muts = await buildMutations({ base, resign, secondAddress: second.address });
+        const balBefore = await readRail('base', config.privateKey);
+        const httpc = getX402HttpClient();
+        let served = false;
+        const sent = [];
+        for (const k of ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'N7']) {
+          if (served) break;
+          const hdr = httpc.encodePaymentSignatureHeader(muts[k]);
+          const r = await sf(callUrl, { method: 'POST', headers: { ...AUTH, ...hdr, 'X-PAYMENT': Object.values(hdr)[0] }, body: '{}' });
+          const txt = await r.text();
+          const refused = r.status === 402 && !txt.includes('"coins"');
+          sent.push([k, r.status, refused]);
+          if (r.status === 200) served = true;
+          await sleep(300);
+        }
+        console.log('    Waiting 90s to check for any transfer from the test wallet...');
+        await sleep(90000);
+        const balAfter = await readRail('base', config.privateKey);
+        const moved = balBefore != null && balAfter != null && balAfter < balBefore;
+        for (const [k, status, refused] of sent) {
+          const ok = refused && !moved;
+          scorer.redRec(PHASE, NAMES[k], '402, no output, no transfer', `${status}${moved ? ' + balance moved' : ''}`, ok,
+            ok ? 'refused' : (status === 200 ? 'CRITICAL: mutated payment accepted!' : moved ? `CRITICAL: balance ${balBefore} -> ${balAfter}` : `CRITICAL: unexpected status ${status}`));
+        }
+        if (served) console.log('    CRITICAL: a mutated authorization was served, matrix stopped (V4)');
+      }
+    } catch (e) {
+      scorer.rec(PHASE, '18.N1-N7 negative matrix', 'ran', 'error', false, e.message.slice(0, 80));
+    }
+  } else {
+    scorer.rec(PHASE, '18.N1-N7 negative matrix', 'skip', 'no wallet or SKIP_PAYMENTS', true);
+  }
+  await sleep(300);
+
+  console.log('  --- wallet sign-in (N8-N10) ---');
+  try {
+    const { privateKeyToAccount, generatePrivateKey } = require('viem/accounts');
+    const w = privateKeyToAccount(generatePrivateKey()); // throwaway, never registered: nothing can be reissued
+    const origin = config.apiBaseUrl;
+    const JSON_H = { 'Content-Type': 'application/json' };
+    const getNonce = async () => {
+      const r = await sf(`${origin}/api/v1/shop/auth/nonce?wallet=${w.address}&purpose=reissue`);
+      const j = r.status === 200 ? await r.json() : (await drain(r), null);
+      return j && j.nonce ? j : null;
+    };
+    const reissue = async (message) => {
+      const signature = await w.signMessage({ message });
+      const r = await sf(`${origin}/api/v1/shop/merchants/me/keys/reissue`, {
+        method: 'POST', headers: JSON_H, body: JSON.stringify({ wallet: w.address, message, signature }),
+      });
+      const t = await r.text();
+      return { status: r.status, leaked: /"api_key"/.test(t) };
+    };
+    const rec = (k, results, what) => {
+      const ok = results.every(x => x.status === 401 && !x.leaked);
+      scorer.redRec(PHASE, NAMES[k], '401, no key', results.map(x => x.status).join(','), ok,
+        ok ? `${what} refused` : `CRITICAL: ${what} not refused`);
+    };
+    const n8 = await getNonce();
+    if (!n8) {
+      for (const k of ['N8', 'N9', 'N10']) scorer.rec(PHASE, NAMES[k], 'nonce endpoint', 'no nonce', false, 'GET /api/v1/shop/auth/nonce gave no nonce');
+    } else {
+      rec('N8', [await reissue(WALLET_SIGNIN('example.com', w.address, n8.nonce, n8.issued_at))], 'foreign domain');
+      const n9 = await getNonce();
+      const m9 = n9 && n9.message;
+      if (m9) rec('N9', [await reissue(m9), await reissue(m9)].slice(1), 'second use of a nonce');
+      else scorer.rec(PHASE, NAMES.N9, 'nonce', 'none', false, 'no nonce');
+      const n10 = await getNonce();
+      if (n10) rec('N10', [await reissue(WALLET_SIGNIN('apibase.pro', w.address, n10.nonce, new Date(Date.now() - 600000).toISOString()))], '10-minute-old message');
+      else scorer.rec(PHASE, NAMES.N10, 'nonce', 'none', false, 'no nonce');
+    }
+  } catch (e) {
+    scorer.rec(PHASE, '18.N8-N10 sign-in', 'ran', 'error', false, e.message.slice(0, 80));
+  }
+  await sleep(300);
 
   // ══════════════════════════════════════════════════════════════
   //  CRITICAL: MCP Session Payment Bypass (#6)
