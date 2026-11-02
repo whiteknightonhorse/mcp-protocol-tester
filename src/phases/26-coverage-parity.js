@@ -61,6 +61,11 @@ const PROBED_PREFIXES = [
   // T-0512: A-GA-01 receipts (/r/) and A-GA-02 attest page (/attest*) went
   // live after the daily run; real probes in 26.5 below.
   '/r/', '/attest',
+  // T-0670 (T-0591 shipped these six public locations; rule T-08: the shipper
+  // owns the probe): tier 2, liveness + twin equality in 26.3, slash canon in
+  // 26.4, JSON-LD types and forbidden phrases in P24 (STATIC_PAGES, 24.6).
+  '/x402-vs-mpp', '/x402-vs-mpp.md', '/what-is-an-mcp-gateway', '/what-is-an-mcp-gateway.md',
+  '/faq', '/faq.md',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every
@@ -99,6 +104,8 @@ const STATIC_ASSET_RE = /\.(png|svg|ico|txt|xml)$|^\/favicon|^\/video\//;
 // exemption's reason stays legible instead of merging into one vague list.
 const ERROR_DOC = new Set(['/502.json', '/503.json', '/504.json', '/50x.json']);
 
+const T0591_SLUGS = ['/x402-vs-mpp', '/what-is-an-mcp-gateway', '/faq'];
+
 function isProbed(route) {
   if (PROBED_EXACT.has(route)) return true;
   if (NOT_PUBLIC.has(route)) return true;
@@ -118,7 +125,10 @@ function parseNginxLocations(conf) {
   return [...routes];
 }
 
-module.exports = async function phase26(scorer, config, context) {
+module.exports.PROBED_PREFIXES = PROBED_PREFIXES;
+module.exports.parseNginxLocations = parseNginxLocations;
+module.exports.isProbed = isProbed;
+const phase26 = async function phase26(scorer, config, context) {
   console.log('\n--- Phase 26: Coverage parity ---');
 
   // 26.0 — control: a synthetic unprobed route must be caught.
@@ -189,18 +199,40 @@ module.exports = async function phase26(scorer, config, context) {
   // 200 + a real content-type + non-empty body; content truth-checking
   // (matching ai.txt/llms.txt claims against the live catalog) is
   // deliberately NOT here — if the operator wants that, it moves to P24.
-  const livenessRoutes = ['/robots.txt', '/ai.txt', '/llms.txt', '/sitemap.xml', '/video/',
-    '/guides/', '/autopilot/incident'];
-  for (const path of livenessRoutes) {
+  const livenessRoutes = [
+    { path: '/robots.txt' }, { path: '/ai.txt' }, { path: '/llms.txt' }, { path: '/sitemap.xml' },
+    { path: '/video/' }, { path: '/guides/' }, { path: '/autopilot/incident' },
+    // T-0670: the six T-0591 locations; page = text/html, twin = text/markdown.
+    ...T0591_SLUGS.flatMap((s) => [{ path: s, ct: 'text/html' }, { path: `${s}.md`, ct: 'text/markdown' }]),
+  ].map((e) => (typeof e === 'string' ? { path: e } : e));
+  for (const { path, ct: wantCt } of livenessRoutes) {
     try {
       const r = await sf(`${config.apiBaseUrl}${path}`);
       const ct = r.headers?.get?.('content-type') || '';
       const body = await (async () => { try { return await r.text(); } catch { return ''; } })();
-      const ok = r.status === 200 && ct.length > 0 && body.length > 0;
-      scorer.rec(PHASE, `26.3 ${path} liveness`, '200 + content-type + non-empty',
+      const ok = r.status === 200 && ct.length > 0 && body.length > 0 && (!wantCt || ct.includes(wantCt));
+      scorer.rec(PHASE, `26.3 ${path} liveness`, `200 + ${wantCt || 'content-type'} + non-empty`,
         `${r.status} ${ct.split(';')[0]} ${body.length}b`, ok);
     } catch (e) {
       scorer.recCatch(PHASE, `26.3 ${path} liveness`, '200 + non-empty', e);
+    }
+  }
+
+  // 26.3b (T-0670) — shared $homepage_type map of T-0591: `GET /<slug>` with
+  // Accept: text/markdown must be byte-identical to `GET /<slug>.md`.
+  const sha = (t) => require('crypto').createHash('sha256').update(t).digest('hex');
+  for (const slug of T0591_SLUGS) {
+    try {
+      const a = await sf(`${config.apiBaseUrl}${slug}`, { headers: { Accept: 'text/markdown' } });
+      const ab = a.status === 200 ? await a.text() : (await drain(a), '');
+      const b = await sf(`${config.apiBaseUrl}${slug}.md`);
+      const bb = b.status === 200 ? await b.text() : (await drain(b), '');
+      const act = a.headers?.get?.('content-type') || '';
+      const ok = a.status === 200 && act.includes('text/markdown') && ab.length > 0 && sha(ab) === sha(bb);
+      scorer.rec(PHASE, `26.3 ${slug} Accept markdown equals ${slug}.md`, '200 text/markdown, sha256 equal',
+        `${a.status} ${act.split(';')[0]} ${sha(ab).slice(0, 12)} vs ${sha(bb).slice(0, 12)}`, ok);
+    } catch (e) {
+      scorer.recCatch(PHASE, `26.3 ${slug} Accept markdown equals ${slug}.md`, '200 text/markdown, sha256 equal', e);
     }
   }
 
@@ -220,6 +252,8 @@ module.exports = async function phase26(scorer, config, context) {
     { path: '/video', location: 'https://apibase.pro/video/' },
     { path: '/guides', location: 'https://apibase.pro/guides/' },
     { path: '/pricing/', location: 'https://apibase.pro/pricing' },
+    // T-0670: T-0591 pages are canonical without the trailing slash.
+    ...T0591_SLUGS.map((s) => ({ path: `${s}/`, location: `https://apibase.pro${s}` })),
   ];
   for (const probe of redirectProbes) {
     try {
@@ -273,3 +307,4 @@ module.exports = async function phase26(scorer, config, context) {
 
   console.log(`  Coverage parity: ${liveRoutes.length} nginx locations, ${unprobed.length} unprobed`);
 };
+module.exports = Object.assign(phase26, module.exports);

@@ -35,7 +35,33 @@ const STATIC_PAGES = ['/', '/connect', '/frameworks', '/pricing', '/catalog', '/
   '/contact', '/privacy', '/terms', '/policy/moderation', '/why', '/partners',
   '/flight-search-intent', '/image-generation-intent', '/company-research-intent',
   // T-0538: SITE-AUDIT pages; red until the site fixes land (intended).
-  '/about', '/integrator', '/integrator/docs', '/integrator/agent-guide'];
+  '/about', '/integrator', '/integrator/docs', '/integrator/agent-guide',
+  // T-0670: the T-0591 pages (JSON-LD types and twins checked in 24.6).
+  '/x402-vs-mpp', '/what-is-an-mcp-gateway', '/faq'];
+
+// T-0670: required JSON-LD @type values per T-0591 page.
+const JSONLD_PAGES = [
+  { path: '/x402-vs-mpp', types: ['TechArticle', 'BreadcrumbList'] },
+  { path: '/what-is-an-mcp-gateway', types: ['TechArticle', 'BreadcrumbList'] },
+  { path: '/faq', types: ['FAQPage', 'BreadcrumbList'] },
+];
+
+function jsonLdTypes(html) {
+  const types = new Set();
+  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  const walk = (n) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (n && typeof n === 'object') {
+      const t = n['@type'];
+      if (typeof t === 'string') types.add(t); else if (Array.isArray(t)) t.forEach((x) => types.add(x));
+      Object.values(n).forEach(walk);
+    }
+  };
+  while ((m = re.exec(html)) !== null) { try { walk(JSON.parse(m[1])); } catch { /* unparseable block adds no types */ } }
+  return types;
+}
+module.exports.jsonLdTypes = jsonLdTypes;
 
 // T-0348: pages whose body must stay clean of placeholder / draft markers.
 // P24 had no such list before this card; it is introduced here for /about and
@@ -62,7 +88,7 @@ function extractToolRefs(html) {
   return [...refs];
 }
 
-module.exports = async function phase24(scorer, config, context) {
+const phase24 = async function phase24(scorer, config, context) {
   console.log('\n--- Phase 24: Docs/catalog truth ---');
 
   // 24.0 — synthetic-fixture self-test: does the detector actually catch a
@@ -157,6 +183,25 @@ module.exports = async function phase24(scorer, config, context) {
     }
   }
 
+  // 24.6 (T-0670) — T-0591 pages: JSON-LD @type present, no forbidden phrases on page or .md twin.
+  for (const jp of JSONLD_PAGES) {
+    try {
+      const r = await sf(`${config.apiBaseUrl}${jp.path}`);
+      const html = r.status === 200 ? await r.text() : (await drain(r), '');
+      const have = jsonLdTypes(html);
+      const missing = jp.types.filter((t) => !have.has(t));
+      scorer.rec(PHASE, `24.6 ${jp.path} JSON-LD types`, jp.types.join('+'),
+        [...have].join(',') || '(none)', r.status === 200 && missing.length === 0,
+        missing.length ? `missing ${missing.join(', ')}` : 'ok');
+      const tr = await sf(`${config.apiBaseUrl}${jp.path}.md`);
+      const md = tr.status === 200 ? await tr.text() : (await drain(tr), '');
+      const hits = FORBIDDEN_PHRASES.filter((ph) => (html + '\n' + md).toLowerCase().includes(ph.toLowerCase()));
+      scorer.rec(PHASE, `24.6 ${jp.path} (+ .md) no forbidden phrases`, 'none', hits.join(', ') || 'none', hits.length === 0);
+    } catch (e) {
+      scorer.recCatch(PHASE, `24.6 ${jp.path}`, jp.types.join('+'), e);
+    }
+  }
+
   // 24.5 (T-0433) — payment wording on the agent-facing text surfaces. The
   // card names /integrator/agent-guide.md, which does not exist; the same
   // document is served by content negotiation on /integrator/agent-guide
@@ -222,3 +267,4 @@ module.exports = async function phase24(scorer, config, context) {
 
   console.log(`  Docs truth: ${allStale.length} stale refs across ${STATIC_PAGES.length} pages`);
 };
+module.exports = Object.assign(phase24, module.exports);
