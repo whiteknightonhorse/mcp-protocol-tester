@@ -275,7 +275,7 @@ Both protocols can coexist on the same server — this tester verifies both work
 | **Signed Underpayment** | 1 | Valid signature with tampered amount |
 | **Cross-Tool Price** | 1 | Cheap tool payment used for expensive tool |
 | **Cross-Chain Replay** | 2 | Tempo nonce as x402, cross-chain payment proof |
-| **Double-Spend 100x** | 1 | 100 parallel requests with single payment |
+| **Double-Spend 100x** | 1 | 100 parallel requests with single payment; RED only on more than one charged success (T-0526 dedup replays are counted separately) |
 | **Replay After Delay** | 1 | Same payment replayed after 30 seconds |
 | **Expired Challenge** | 1 | Payment with maxTimeoutSeconds=0 |
 | **Proto Pollution** | 1 | `__proto__.isPaid=true` bypass attempt |

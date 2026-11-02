@@ -8,6 +8,7 @@ const { mcpRequest } = require('../lib/mcp-client');
 const { getX402Client, makeX402Payment, makeX402PaymentPayload, getX402HttpClient } = require('../lib/x402-client');
 const { buildMutations, NAMES, WALLET_SIGNIN } = require('../lib/p18-negative');
 const { readRail } = require('../lib/wallet-balance');
+const { classifyDoubleSpend } = require('../lib/double-spend');
 
 const PHASE = 'P18';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -537,11 +538,15 @@ module.exports = async function phase18(scorer, config, context) {
           }, 15000)
         );
         const results = await Promise.all(promises);
-        const count200 = results.filter(r => r.status === 200).length;
+        const oks = results.filter(r => r.status === 200).map(r => ({
+          charged: r.headers.get('x-apibase-charged'),
+          receipt: r.headers.get('x-apibase-receipt'),
+        }));
+        const v = classifyDoubleSpend(oks);
 
-        scorer.rec(PHASE, '18.12 double-spend 100x', '<=1 success', `${count200}/100`,
-          count200 <= 1,
-          count200 > 1 ? `CRITICAL: ${count200} double-spends from 1 payment!` : 'atomic payment enforcement');
+        scorer.rec(PHASE, '18.12 double-spend 100x', '<=1 charged', `charged ${v.charged}/100, dedup replays ${v.replays}`,
+          !v.red,
+          v.red ? `CRITICAL: ${v.charged} charged successes from 1 payment (${v.foreign} with another receipt)!` : 'atomic payment enforcement');
 
         for (const r of results) await drain(r);
       } catch (e) {
