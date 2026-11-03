@@ -22,6 +22,16 @@ const ACCEPTED_SLUG = 'apibase-demo';
 
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 
+// T-0671: which bytes does the index entry's sha256 cover? When the index publishes source_url (T-0669),
+// hash exactly those bytes and label with hash_of; otherwise keep the pre-0669 path rule (registry docs:
+// /legal/<id>.md; terms/privacy: the served static page).
+function hashPathFor(d) {
+  if (typeof d?.source_url === 'string' && d.source_url) {
+    return { path: d.source_url, hashOf: typeof d.hash_of === 'string' ? d.hash_of : 'source_url' };
+  }
+  return { path: d.registry === false ? d.url : `${d.url}.md`, hashOf: '' };
+}
+
 // Returns the list of contract violations of a 428 body ([] = conforming).
 function check428Body(body, index) {
   const bad = [];
@@ -64,12 +74,10 @@ module.exports = async function phase34(scorer, config) {
   if (!Array.isArray(index)) return;
   for (const d of index) {
     try {
-      // Registry docs are hashed over the markdown source (/legal/<id>.md);
-      // terms/privacy are hashed over the served static HTML.
-      const path = d.registry === false ? d.url : `${d.url}.md`;
+      const { path, hashOf } = hashPathFor(d);
       const r = await sf(`${base}${path}`);
       const got = r.status === 200 ? sha(Buffer.from(await r.arrayBuffer())) : `HTTP ${r.status}`;
-      scorer.rec(PHASE, `34.1 sha256 of ${path}`, d.sha256, got, got === d.sha256);
+      scorer.rec(PHASE, `34.1 sha256 of ${path}${hashOf ? ` (hash_of=${hashOf})` : ''}`, d.sha256, got, got === d.sha256);
     } catch (e) {
       scorer.recCatch(PHASE, `34.1 sha256 of ${d.url}`, d.sha256, e);
     }
@@ -111,3 +119,5 @@ module.exports = async function phase34(scorer, config) {
     scorer.recCatch(PHASE, '34.2 terms gate', '428 contract', e);
   }
 };
+
+module.exports.hashPathFor = hashPathFor;

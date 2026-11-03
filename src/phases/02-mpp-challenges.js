@@ -6,6 +6,7 @@
 const { sf, drain, getDelay } = require('../lib/http');
 const { parseMppChallenge } = require('../lib/mpp-client');
 const { getBody } = require('../utils/assert');
+const { isPerMinute, isDurationIssue422, perMinuteChecks, formulaUsd, DETAIL_422 } = require('../lib/per-minute');
 
 const PHASE = 'P2';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
@@ -60,7 +61,8 @@ module.exports = async function phase2(scorer, config, context) {
 
     const wwwAuth = r.headers?.get?.('www-authenticate') || '';
     const status = r.status;
-    await drain(r);
+    let body422 = null;
+    if (status === 422) { try { body422 = await r.json(); } catch { await drain(r); } } else await drain(r);
 
     if (status === 502 || status === 503) {
       stats.unavailable503++;
@@ -73,6 +75,17 @@ module.exports = async function phase2(scorer, config, context) {
       stats.errors500++;
       scorer.recQ(PHASE, `mpp-${id}`, '402', status, false, 'server error');
       scorer.addError('HIGH', PHASE, `500 on ${id}`, `Status ${status}`, 'Check server logs');
+      continue;
+    }
+
+    if (status === 422 && isDurationIssue422(status, body422)) {
+      stats.schema400++;
+      // T-0425 per-audio-minute rule: 422 naming duration_seconds = pre-payment validation, not a failure.
+      scorer.recQ(PHASE, `mpp-${id}`, '402|422', status, true, DETAIL_422);
+      if (isPerMinute(tool)) {
+        const pm = await perMinuteChecks(scorer, PHASE, 'mpp', config, context, tool);
+        (context.perMinute = context.perMinute || {})[`mpp:${id}`] = pm.amountUsd;
+      }
       continue;
     }
 
@@ -119,7 +132,12 @@ module.exports = async function phase2(scorer, config, context) {
           // relative to its own listed price, not just an absolute
           // outlier). $0.0001 tolerance for rounding.
           const amount = Number(parsed.decoded.amount);
-          const priceUsd = parseFloat(tool.pricing?.price_usd ?? tool.price_usd ?? 'NaN');
+          // T-0671: a per-audio-minute tool's catalog price is only the minimum; the challenge amount follows
+          // max($0.01, ceil(minutes) x $0.005) for the probe body's duration_seconds.
+          const probeSecs = getBody(tool)?.duration_seconds;
+          const priceUsd = isPerMinute(tool) && Number.isFinite(probeSecs)
+            ? formulaUsd(probeSecs)
+            : parseFloat(tool.pricing?.price_usd ?? tool.price_usd ?? 'NaN');
           let amountOk, expDesc;
           if (!isNaN(priceUsd)) {
             const expectedMicroUsd = Math.round(priceUsd * 1e6);
@@ -161,6 +179,11 @@ module.exports = async function phase2(scorer, config, context) {
     } else {
       stats.noMpp++;
       scorer.recQ(PHASE, `mpp-${id}`, '402', status, status === 200, `unexpected status`);
+    }
+
+    if (isPerMinute(tool) && status === 402) {
+      const pm = await perMinuteChecks(scorer, PHASE, 'mpp', config, context, tool);
+      (context.perMinute = context.perMinute || {})[`mpp:${id}`] = pm.amountUsd;
     }
 
     await sleep(getDelay(id));

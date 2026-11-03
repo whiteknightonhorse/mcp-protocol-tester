@@ -5,6 +5,7 @@
  */
 const { sf, drain, getDelay } = require('../lib/http');
 const { getBody } = require('../utils/assert');
+const { isPerMinute, isDurationIssue422, perMinuteChecks, DETAIL_422 } = require('../lib/per-minute');
 
 const PHASE = 'P3';
 const SKIP_IDS = new Set(['health', 'agents.register', 'agents.list']);
@@ -71,6 +72,18 @@ module.exports = async function phase3(scorer, config, context) {
 
     let body = null;
     try { body = await r.json(); } catch { await drain(r); }
+
+    if (status === 422 && isDurationIssue422(status, body)) {
+      stats.schema400++;
+      // T-0425 per-audio-minute rule: 422 naming duration_seconds = pre-payment validation, not a failure.
+      scorer.recQ(PHASE, `x402-${id}`, '402|422', status, true, DETAIL_422);
+      if (isPerMinute(tool)) {
+        const pm = await perMinuteChecks(scorer, PHASE, 'x402', config, context, tool);
+        (context.perMinute = context.perMinute || {})[`x402:${id}`] = pm.amountUsd;
+      }
+      await sleep(getDelay(id));
+      continue;
+    }
 
     if (status === 402 && body && body.x402Version >= 1) {
       const accepts = body.accepts || [];
@@ -154,7 +167,22 @@ module.exports = async function phase3(scorer, config, context) {
       scorer.recQ(PHASE, `x402-${id}`, '402', status, status === 200, 'unexpected status');
     }
 
+    if (isPerMinute(tool) && status === 402) {
+      const pm = await perMinuteChecks(scorer, PHASE, 'x402', config, context, tool);
+      (context.perMinute = context.perMinute || {})[`x402:${id}`] = pm.amountUsd;
+    }
+
     await sleep(getDelay(id));
+  }
+
+  // T-0671 cross-rail agreement for per-audio-minute tools (P2 ran first and left its amount in context).
+  for (const key of Object.keys(context.perMinute || {})) {
+    if (!key.startsWith('x402:')) continue;
+    const id = key.slice(5);
+    const m = context.perMinute[`mpp:${id}`]; const x = context.perMinute[key];
+    if (m === undefined) continue;
+    scorer.rec(PHASE, `P3 ${id} per-minute amount agrees on both rails`, 'mpp == x402 == minute formula',
+      `mpp=${m ?? 'n/a'} x402=${x ?? 'n/a'}`, m !== null && x !== null && m === x);
   }
 
   // P3.X Challenge nonce uniqueness

@@ -109,6 +109,8 @@ const KNOWN_PARAMS = {
   'igdb.game_details': { id: 1942 },
   'tmdb.movie_search': { query: 'inception' }, 'tmdb.movie_details': { id: 27205 },
   // Jobs
+  // T-0671: per-audio-minute tool (T-0425) needs duration_seconds; 600 s = 10 min = $0.05 (above the $0.01 minimum)
+  'transcribe.submit': { audio_url: 'https://example.com/audio.mp3', duration_seconds: 600 },
   'jobs.job_search': { keywords: 'python developer', location: 'Berlin' },
 };
 
