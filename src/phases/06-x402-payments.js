@@ -125,7 +125,7 @@ module.exports = async function phase6(scorer, config, context) {
         stats.paid++;
         let result = null;
         try { result = await r.json(); } catch { await drain(r); }
-        if (!firstPaid && result) firstPaid = { id, body: result, receipt: r.headers.get('x-apibase-receipt') };
+        if (!firstPaid && result) firstPaid = { id, body: result, receipt: r.headers.get('x-apibase-receipt'), hdrs: [...r.headers.keys()].filter(k => /apibase|payment|receipt/i.test(k)).join(',') };
         const amount = parseFloat(body402.accepts[0].amount || body402.accepts[0].maxAmountRequired || '0');
         const cost = amount / 1e6; // USDC has 6 decimals in raw amount
         context.spentX402 += cost > 0 && cost < 1 ? cost : 0;
@@ -173,7 +173,7 @@ async function retrieveCheck(scorer, config, paid) {
   const name = 'x402-receipt-retrieve';
   if (!paid) { scorer.rec(PHASE, name, 'paid call', 'none', false, 'NOT RUN: no paid 200 to retrieve'); return; }
   try {
-    if (!paid.receipt) { scorer.rec(PHASE, name, 'X-APIbase-Receipt', 'missing', false, `${paid.id}: no receipt header`); return; }
+    if (!paid.receipt) { scorer.rec(PHASE, name, 'X-APIbase-Receipt', 'missing', false, `${paid.id}: no receipt header (headers: ${paid.hdrs || 'none'})`); return; }
     const rurl = /^https?:\/\//.test(paid.receipt) ? paid.receipt : `${config.apiBaseUrl}/r/${paid.receipt}.json`;
     const t0 = Date.now();
     let rec = null;
@@ -190,9 +190,9 @@ async function retrieveCheck(scorer, config, paid) {
     const g = await sf(pr.url, { headers: { 'X-Payer-Address': account.address, 'X-Payer-Signature': sig } });
     let gb = null;
     try { gb = await g.json(); } catch { await drain(g); }
-    const v = rr.classifyRetrieve(g.status, gb, paid.body, pr.id);
+    const v = rr.classifyRetrieve(g.status, gb, paid.body, pr.id, !!pr.retained, rec.response_sha256);
     const secs = Math.round((Date.now() - t0) / 1000);
-    scorer.rec(PHASE, name, '200 charged:false', g.status, v.ok && secs <= 60,
+    scorer.rec(PHASE, name, pr.retained ? '200 charged:false' : '410 delivered', g.status, v.ok && secs <= 60,
       `${paid.id} receipt=${pr.id} tx=${pr.tx || 'n/a'} transfers=1 t=${secs}s ${v.why}`);
     console.log(`  receipt retrieve: ${v.ok ? 'OK' : 'FAIL'} receipt=${pr.id} tx=${pr.tx || 'n/a'} (one transfer for the pair)`);
   } catch (e) {

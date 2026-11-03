@@ -19,7 +19,14 @@ function parseReceipt(receipt) {
 }
 
 // Judge the signed GET: 200, status delivered, charged:false, same receipt, body equals the first paid body.
-function classifyRetrieve(status, body, firstBody, receiptId) {
+function classifyRetrieve(status, body, firstBody, receiptId, retained = true, sha = null) {
+  if (!retained) {
+    // Documented (payments.md Retrieve): result never stored (internal payer, or > 64 KiB) -> 410 with the receipt proof.
+    if (status !== 410) return { ok: false, why: `receipt not retained, retrieve answered ${status}, want 410` };
+    if (!body || body.receipt_id !== receiptId || body.status !== 'delivered') return { ok: false, why: '410 body lacks receipt_id/status delivered' };
+    if (sha && body.response_sha256 !== sha) return { ok: false, why: '410 response_sha256 differs from the receipt' };
+    return { ok: true, partial: true, why: '410 delivered (result not retained for this payer; 200 path NOT RUN)' };
+  }
   if (status !== 200) return { ok: false, why: `retrieve answered ${status}, want 200` };
   if (!body || typeof body !== 'object') return { ok: false, why: 'retrieve body is not JSON' };
   if (body.charged !== false) return { ok: false, why: `charged=${JSON.stringify(body.charged)}, want false` };

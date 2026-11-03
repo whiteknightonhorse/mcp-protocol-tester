@@ -19,6 +19,9 @@ check('retrieve charged:true', rr.classifyRetrieve(200, { ...good, charged: true
 check('retrieve 401', rr.classifyRetrieve(401, { error: 'retrieve_signature_invalid' }, body, ID).ok, false);
 check('retrieve 410', rr.classifyRetrieve(410, good, body, ID).ok, false);
 check('retrieve other body', rr.classifyRetrieve(200, { ...good, result: { a: 2 } }, body, ID).ok, false);
+check('retrieve 410 not retained ok', rr.classifyRetrieve(410, { receipt_id: ID, status: 'delivered', response_sha256: 'ab' }, body, ID, false, 'ab').ok, true);
+check('retrieve 410 not retained sha differs', rr.classifyRetrieve(410, { receipt_id: ID, status: 'delivered', response_sha256: 'cd' }, body, ID, false, 'ab').ok, false);
+check('retrieve 200 when not retained', rr.classifyRetrieve(200, good, body, ID, false).ok, false);
 check('inflight ok', rr.classifyInFlight(409, { error: 'payment_in_flight', retry_after: 70 }).ok, true);
 check('inflight retry_after<5', rr.classifyInFlight(409, { error: 'payment_in_flight', retry_after: 2 }).ok, false);
 check('inflight missing retry_after', rr.classifyInFlight(409, { error: 'payment_in_flight' }).ok, false);
