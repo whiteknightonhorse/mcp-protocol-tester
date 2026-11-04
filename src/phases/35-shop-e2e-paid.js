@@ -104,7 +104,7 @@ module.exports = async function phase35(scorer, config, context) {
     const z = { buyer: shop.newBuyerToken() };
     const zq = await shop.createQuote(config, e2e.TEST_SKU, undefined, `tester-p35-${crypto.randomUUID()}`, z.buyer);
     const zok = zq.status === 201 && !!zq.json?.quote_id && zq.json?.total_usd === 0.01;
-    scorer.rec(PHASE, '35.1 quote __apibase_test', '201, total_usd 0.01', `${zq.status} ${zq.json?.total_usd}`, zok);
+    scorer.rec(PHASE, '35.1 quote __apibase_test', '201, total_usd 0.01', shop.quoteGot(zq, zq.json?.total_usd), zok);
     if (zq.json?.order_id) orders.push({ orderId: zq.json.order_id, buyer: z.buyer, paid: false });
     if (zq.json?.order_id) {
       const c = await shop.cancelOrder(config, zq.json.order_id, z.buyer);

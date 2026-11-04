@@ -86,8 +86,15 @@ module.exports = async function phase34(scorer, config) {
   // 34.2 — the gate.
   try {
     const demo = await quoteProbe(config, ACCEPTED_SLUG);
-    scorer.rec(PHASE, `34.2 control: ${ACCEPTED_SLUG} (accepted) is not gated`, 'not 428/410',
-      String(demo.status), demo.status !== 428 && demo.status !== 410);
+    // T-0708: a 428 on the accepted control inside the 30-day window of the newest index entry is a server defect (RED).
+    const newest = index.reduce((m, d) => Math.max(m, Date.parse(d.effective_from) || 0), 0);
+    const inWindow = newest > 0 && Date.now() < newest + 30 * 86400000;
+    const earlyDet = demo.status === 428 && inWindow
+      ? `428 before the 30-day window ended: effective_from ${new Date(newest).toISOString().slice(0, 10)} of the newest /legal/index.json entry`
+      : '';
+    const ctlGot = demo.status === 428 || demo.status === 410 ? `${demo.status} ${demo.body?.error_code || '(no error_code)'}` : String(demo.status);
+    const ctlOk = demo.status !== 428 && demo.status !== 410;
+    (earlyDet ? scorer.redRec : scorer.rec).call(scorer, PHASE, `34.2 control: ${ACCEPTED_SLUG} (accepted) is not gated`, 'not 428/410', ctlGot, ctlOk, earlyDet);
 
     // T-0563: opus-test-shop is deactivated; the live answer is 410 merchant_unavailable, and that gate
     // runs before the terms gate, so the 428 contract is not reachable through this shop.

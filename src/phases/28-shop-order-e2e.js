@@ -33,8 +33,12 @@ module.exports = async function phase28(scorer, config) {
     const q = await shop.createQuote(config, SKU, undefined, idem, buyer);
     quote = q.json;
     const ok = q.status === 201 && !!quote?.quote_id && !!quote?.order_id;
-    scorer.rec(PHASE, '28.1 POST /quotes demo-bundle', '201 + quote_id + order_id', `${q.status} ${quote?.quote_id || '(none)'}`, ok);
+    scorer.rec(PHASE, '28.1 POST /quotes demo-bundle', '201 + quote_id + order_id', shop.quoteGot(q, quote?.quote_id || '(none)'), ok);
     if (!ok) quote = null;
+    if (q.status === 201) {
+      // INFO only (T-0708): the 30-day re-acceptance window banner is correct behaviour, never a FAIL.
+      scorer.recQ(PHASE, '28.1 terms_update_pending', 'INFO: absent or the pending doc ids and versions', shop.termsPendingText(q.json), true);
+    }
     if (quote) {
       scorer.rec(PHASE, '28.1 quote total and item', 'total_usd 5, sku demo-bundle',
         `total_usd=${quote.total_usd} sku=${quote.items?.[0]?.sku}`, quote.total_usd === 5 && quote.items?.[0]?.sku === SKU);

@@ -42,6 +42,21 @@ function createQuote(config, sku, extra, idemKey, buyer) {
 
 // A QUOTED order is voided for free; used so the run leaves no open quote behind.
 // `buyer` must be the token that created the quote; another buyer's order answers 404 by design.
+// Actual-column text for a quote answer: success keeps `<status> <ok text>`; a non-success status
+// prints `<status> <error_code|'(no error_code)'>` (T-0708). The shop uses error_code; older bodies used error.
+function quoteGot(r, okText) {
+  if (r.status === 201) return `${r.status} ${okText}`;
+  const code = r.json?.error_code ?? r.json?.error;
+  return `${r.status} ${typeof code === 'string' && code ? code : '(no error_code)'}`;
+}
+
+// Lists the documents of a terms_update_pending banner as `doc_id@version`, or `absent`.
+function termsPendingText(json) {
+  const docs = json?.terms_update_pending?.docs;
+  if (!Array.isArray(docs) || docs.length === 0) return 'absent';
+  return docs.map((d) => `${d?.doc_id}@${d?.version}`).join(', ');
+}
+
 function cancelOrder(config, orderId, buyer) {
   return call(config, 'POST', `/orders/${orderId}/cancel`, { reason: 'mcp-protocol-tester' }, buyerHeaders(buyer));
 }
@@ -81,5 +96,5 @@ function wrongAmountPayment(quoteId, payTo, micro) {
 }
 
 module.exports = {
-  SLUG, DEFAULT_SLUG, resolveSlug, PLATFORM_BASE, PLATFORM_TEMPO, base: shopBase, call, createQuote, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
+  SLUG, DEFAULT_SLUG, resolveSlug, PLATFORM_BASE, PLATFORM_TEMPO, base: shopBase, call, createQuote, quoteGot, termsPendingText, cancelOrder, newBuyerToken, decodeB64Json, parseMppChallenge, wrongAmountPayment,
 };

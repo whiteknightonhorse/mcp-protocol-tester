@@ -29,7 +29,7 @@ module.exports = async function phase29(scorer, config, context) {
     const q = await shop.createQuote(config, SKU, { subscribe: true }, undefined, buyer);
     quote = q.json;
     const ok = q.status === 201 && !!quote?.quote_id;
-    scorer.rec(PHASE, '29.1 POST /quotes demo-daily subscribe:true', '201 + quote_id', `${q.status} ${quote?.quote_id || '(none)'}`, ok);
+    scorer.rec(PHASE, '29.1 POST /quotes demo-daily subscribe:true', '201 + quote_id', shop.quoteGot(q, quote?.quote_id || '(none)'), ok);
     if (!ok) quote = null;
     if (quote) {
       const t = quote.subscription_terms;
