@@ -16,7 +16,6 @@ reports/*.md
 # Node
 node_modules/
 dist/
-package-lock.json
 
 # OS
 .DS_Store

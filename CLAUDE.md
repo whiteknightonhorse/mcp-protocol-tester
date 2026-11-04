@@ -51,3 +51,7 @@ REST_BASE_URL=https://apibase.pro/api/v1
 API_KEY=            (empty = unauthenticated probing)
 SKIP_PAYMENTS=true  (false spends; see the Cost column in docs/PHASES.md)
 ```
+
+## Git Rules
+- package-lock.json is tracked and is the dependency pin (CI installs with `npm ci`).
+- Any commit that changes a dependency range in package.json updates package-lock.json in the same commit: `npm ci` in CI is red otherwise, and a drifted lock would make the server tree dirty and stop the daily git pull.
