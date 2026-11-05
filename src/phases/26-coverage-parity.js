@@ -66,6 +66,8 @@ const PROBED_PREFIXES = [
   // 26.4, JSON-LD types and forbidden phrases in P24 (STATIC_PAGES, 24.6).
   '/x402-vs-mpp', '/x402-vs-mpp.md', '/what-is-an-mcp-gateway', '/what-is-an-mcp-gateway.md',
   '/faq', '/faq.md',
+  // T-0712: refund policy JSON (A-GD-01); real probe in 26.5 below.
+  '/policy/refunds.json',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every
@@ -303,6 +305,21 @@ const phase26 = async function phase26(scorer, config, context) {
     } catch (e) {
       scorer.recCatch(PHASE, `26.5 ${probe.path}`, `${probe.status} ${probe.ct || ''}`.trim(), e);
     }
+  }
+
+  // T-0712: /policy/refunds.json — 200, application/json, body parses.
+  // The policy wording is deliberately not asserted.
+  try {
+    const r = await sf(`${config.apiBaseUrl}/policy/refunds.json`);
+    const ct = r.headers?.get?.('content-type') || '';
+    const body = await (async () => { try { return await r.text(); } catch { return ''; } })();
+    let parsed = false;
+    try { JSON.parse(body); parsed = true; } catch { /* not JSON */ }
+    const ok = r.status === 200 && ct.includes('application/json') && parsed;
+    scorer.rec(PHASE, '26.5 /policy/refunds.json', '200 application/json + parses',
+      `${r.status} ${ct.split(';')[0]} ${parsed ? 'json' : 'not-json'}`, ok);
+  } catch (e) {
+    scorer.recCatch(PHASE, '26.5 /policy/refunds.json', '200 application/json + parses', e);
   }
 
   console.log(`  Coverage parity: ${liveRoutes.length} nginx locations, ${unprobed.length} unprobed`);
