@@ -4,6 +4,7 @@
  * float precision edge cases, and business logic validation.
  */
 const { sf, drain } = require('../lib/http');
+const { classifyDoubleSpend } = require('../lib/double-spend');
 const { getBody } = require('../utils/assert');
 const { getX402Client, getX402HttpClient, makeX402Payment } = require('../lib/x402-client');
 
@@ -254,23 +255,26 @@ module.exports = async function phase8(scorer, config, context) {
               headers: paidHeaders,
               body: apodBody,
             }).then(async (r) => {
-              const s = r.status;
+              const o = { status: r.status, charged: r.headers.get('x-apibase-charged'), receipt: r.headers.get('x-apibase-receipt') };
               await drain(r);
-              return s;
+              return o;
             })
           );
 
+          // T-0714: count charged deliveries and distinct receipts, not HTTP 200s.
+          // A 200 with X-APIbase-Charged:false and the first receipt is a dedup replay; a 200 without the header is charged (fail closed).
           const results = await Promise.all(racePromises);
-          const count200 = results.filter(s => s === 200).length;
+          const oks = results.filter(o => o.status === 200);
+          const v = classifyDoubleSpend(oks);
+          const receipts = new Set(oks.map(o => o.receipt || 'none')).size;
+          const note = `${v.charged} charged + ${v.replays} dedup replays, ${receipts} receipt${receipts === 1 ? '' : 's'}; statuses: ${results.map(o => o.status).join(',')}`;
 
-          const ok = count200 <= 1;
-          scorer.rec(PHASE, '8.2 Double-spend', '<=1 x 200',
-            `${count200} x 200`, ok,
-            `results: ${results.join(',')}`);
+          scorer.rec(PHASE, '8.2 Double-spend', '<=1 charged, 1 receipt',
+            `${v.charged} charged, ${receipts} receipts`, !v.red, note);
 
-          if (!ok) {
-            scorer.addError('CRITICAL', PHASE, 'Double-spend: multiple 200s from single payment',
-              `${count200}/10 requests returned 200`,
+          if (v.red) {
+            scorer.addError('CRITICAL', PHASE, 'Double-spend: multiple charged deliveries from single payment',
+              note,
               'Implement atomic payment processing with nonce/mutex');
           }
         }

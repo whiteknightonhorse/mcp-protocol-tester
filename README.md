@@ -20,7 +20,7 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 - **Dual-rail payment testing** — x402 + MPP in parallel with cross-rail price validation
 - **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
 - **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
-- **Payment security** — replay attacks, race conditions, double-spend, amount manipulation, stale challenges
+- **Payment security** — replay attacks, race conditions, double-spend (RED only on more than one charged delivery or distinct receipt; dedup replays are allowed), amount manipulation, stale challenges
 - **Advanced security** — SSRF, timing attacks, CORS, header injection, fuzz testing, response analysis
 - **Payment bypass prevention** — replay, double-spend 100x, signed underpayment, cache leak, MCP session abuse, cross-rail nonce
 - **Resilience testing** — brute force, SSL/TLS cipher/cert validation, enumeration, error cascade

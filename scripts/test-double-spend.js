@@ -14,3 +14,10 @@ assert.strictEqual(classifyDoubleSpend([ch(R1), dd(R2)]).red, true);
 assert.strictEqual(classifyDoubleSpend([ch(R1)]).red, false);
 assert.strictEqual(classifyDoubleSpend([]).red, false);
 console.log('PASS double-spend classifier (7 fixtures)');
+// T-0714: 8.2 shape (10 responses, one payment): same classifier.
+const nine = Array.from({ length: 9 }, () => dd(R1));
+v = classifyDoubleSpend([ch(R1), ...nine]);
+assert.deepStrictEqual([v.charged, v.replays, v.red], [1, 9, false]);
+assert.strictEqual(classifyDoubleSpend([ch(R1), ch(R1), ...nine.slice(0, 8)]).red, true);
+assert.strictEqual(classifyDoubleSpend([{ charged: null, receipt: R1 }, { charged: undefined, receipt: R1 }]).red, true);
+console.log('PASS 8.2 fixtures (1 charged + 9 replays PASS; 2 charged FAIL; missing header = charged)');
