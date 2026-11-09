@@ -32,6 +32,16 @@ function listedUrls(text, origin) {
   return [...out];
 }
 
+// T-0725 contract for GET /mcp/m/<slug> without a session: 3xx redirect, or 200 storefront card.
+function mcpGetAnswerOk(status, body) {
+  if (status >= 300 && status < 400) return true;
+  if (status !== 200) return false;
+  try {
+    const j = JSON.parse(body);
+    return j && j.transport === 'streamable-http' && typeof j.endpoint === 'string';
+  } catch { return false; }
+}
+
 module.exports = async function phase27(scorer, config) {
   console.log('\n--- Phase 27: Storefront / Integrator surface ---');
   const base = config.apiBaseUrl;
@@ -78,8 +88,9 @@ module.exports = async function phase27(scorer, config) {
   }
 
   // 27.3 — every URL a llms.txt lists answers. The MCP endpoint is POST-only
-  // (documented as "connect ... (MCP)"): assert POST initialize works (27.1)
-  // and that GET is a 4xx refusal, never a 5xx.
+  // (documented as "connect ... (MCP)"): assert POST initialize works (27.1).
+  // GET without a session answers the storefront card (200 JSON) or a 3xx
+  // redirect (T-0725); 404, 5xx and any other 200 body fail.
   const llmsDocs = [
     { name: `/m/${SLUG}/llms.txt`, url: `${base}/m/${SLUG}/llms.txt` },
     { name: '/integrator/llms.txt', url: `${base}/integrator/llms.txt` },
@@ -96,9 +107,16 @@ module.exports = async function phase27(scorer, config) {
       for (const u of urls) {
         const isMcp = u.startsWith(`${base}/mcp/`);
         const r = await sf(u);
-        await drain(r);
-        const ok = isMcp ? (r.status >= 400 && r.status < 500) : r.status === 200;
-        if (!ok) bad.push(`${u.slice(base.length)} -> ${r.status}${isMcp ? ' (POST-only, expected 4xx on GET)' : ''}`);
+        let ok;
+        if (isMcp) {
+          let body = '';
+          try { body = await r.text(); } catch { /* keep empty */ }
+          ok = mcpGetAnswerOk(r.status, body);
+        } else {
+          await drain(r);
+          ok = r.status === 200;
+        }
+        if (!ok) bad.push(`${u.slice(base.length)} -> ${r.status}${isMcp ? ' (expected storefront card 200 or 3xx on GET)' : ''}`);
       }
       scorer.rec(PHASE, `27.3 ${doc.name} every listed URL answers`, `${urls.length} ok`,
         bad.length ? bad.join('; ') : `${urls.length} ok`, bad.length === 0);
@@ -144,3 +162,5 @@ module.exports = async function phase27(scorer, config) {
     scorer.recCatch(PHASE, '27.5 discover/shops parity', 'subset', e);
   }
 };
+
+module.exports.mcpGetAnswerOk = mcpGetAnswerOk;
