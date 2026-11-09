@@ -15,6 +15,13 @@ function classifyDoubleSpend(oks) {
       if (i !== firstIdx && o.r !== first) foreign++;
     }
   });
-  return { charged, replays, foreign, red: charged > 1 || foreign > 0 };
+  // T-0717: no charged response and every 200 is a charged:false replay sharing one receipt = the
+  // payment under test was never settled (an earlier identical call inside the dedup window was).
+  const inconclusive = list.length > 0 && firstIdx < 0 && list.every((o) => o.c === 'false' && o.r && o.r === list[0].r);
+  if (inconclusive) {
+    return { charged: 0, replays: list.length, foreign: 0, inconclusive: true, red: false,
+      note: 'all replays of an earlier charge - 8.2 payment unused' };
+  }
+  return { charged, replays, foreign, inconclusive: false, red: charged > 1 || foreign > 0 };
 }
 module.exports = { classifyDoubleSpend };

@@ -221,7 +221,10 @@ module.exports = async function phase8(scorer, config, context) {
   } else {
     const apodId = apodTool.id || apodTool.name;
     const apodUrl = `${config.apiUrl}/tools/${apodId}/call`;
-    const apodBody = JSON.stringify(getBody(apodTool));
+    // T-0717: x402 dedup answers an identical cacheable call from the same wallet within 2 minutes from cache
+    // (X-APIbase-Charged:false), so 8.2 must not repeat the P5/P6/P17 nasa.apod call ({}). A fixed historical
+    // date no other phase uses makes the 8.2 payment the one that is actually settled.
+    const apodBody = JSON.stringify({ ...getBody(apodTool), date: '2023-07-04' });
 
     try {
       // Probe to get 402
@@ -269,8 +272,14 @@ module.exports = async function phase8(scorer, config, context) {
           const receipts = new Set(oks.map(o => o.receipt || 'none')).size;
           const note = `${v.charged} charged + ${v.replays} dedup replays, ${receipts} receipt${receipts === 1 ? '' : 's'}; statuses: ${results.map(o => o.status).join(',')}`;
 
-          scorer.rec(PHASE, '8.2 Double-spend', '<=1 charged, 1 receipt',
-            `${v.charged} charged, ${receipts} receipts`, !v.red, note);
+          if (v.inconclusive) {
+            // INFO: not red, not CRITICAL - the payment under test was never settled.
+            scorer.rec(PHASE, '8.2 Double-spend', '<=1 charged, 1 receipt',
+              'INCONCLUSIVE (INFO)', true, `${v.note}; ${note}`);
+          } else {
+            scorer.rec(PHASE, '8.2 Double-spend', '<=1 charged, 1 receipt',
+              `${v.charged} charged, ${receipts} receipts`, !v.red, note);
+          }
 
           if (v.red) {
             scorer.addError('CRITICAL', PHASE, 'Double-spend: multiple charged deliveries from single payment',
