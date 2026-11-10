@@ -1,7 +1,9 @@
 // One real x402 paid REST call (dispatcher, GenLayer live receipt). Key only from env PAYER_KEY; never printed.
 const { initX402, makeX402Payment } = require("../src/lib/x402-client.js");
 const BASE = "https://apibase.pro", TOOL = process.argv[2] || "polymarket.prices";
-const BODY = JSON.stringify(JSON.parse(process.argv[3] || "{}"));
+const REQ = Number(process.env.MAX_MICRO);
+const MAX = Math.min(REQ > 0 ? REQ : 10000, 500000); // MAX_MICRO: default 10000, ceiling 500000
+const BODY =JSON.stringify(JSON.parse(process.argv[3] || "{}"));
 (async () => {
   if (!process.env.PAYER_KEY || !initX402(process.env.PAYER_KEY)) throw new Error("no payer key");
   const url = `${BASE}/api/v1/tools/${TOOL}/call`;
@@ -10,7 +12,7 @@ const BODY = JSON.stringify(JSON.parse(process.argv[3] || "{}"));
   const c = await r1.json().catch(() => ({}));
   if (r1.status !== 402 || !Array.isArray(c.accepts)) throw new Error(`expected 402, got ${r1.status}`);
   const base = c.accepts.find(a => a.network === "eip155:8453");
-  if (!base || Number(base.amount) > 10000) throw new Error(`refused: amount ${base && base.amount} > 0.01 USDC`);
+  if (!base || Number(base.amount) > MAX) throw new Error(`refused: amount ${base && base.amount} > ${MAX} micro-USDC`);
   let hdr = await makeX402Payment({ ...c, accepts: [base] });
   if (hdr && typeof hdr === "object") hdr = hdr["PAYMENT-SIGNATURE"] || Object.values(hdr)[0];
   const r2 = await fetch(url, { method: "POST", headers: { ...h, "X-PAYMENT": hdr }, body: BODY });
