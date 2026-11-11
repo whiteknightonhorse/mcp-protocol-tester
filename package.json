@@ -4,7 +4,7 @@
   "description": "Universal test suite for MCP servers — dual-rail payment testing (x402 + MPP/Tempo), 402 challenge validation, security audit, load testing",
   "main": "src/index.js",
   "scripts": {
-    "test": "npm run phases:check && node scripts/test-internal-pattern.js && node scripts/test-p26-t0591.js && node scripts/test-t0671.js && node scripts/test-t0678.js && node scripts/test-t0708.js && node scripts/test-verdict.js && node scripts/test-wallet-blocked.js && node scripts/test-p18-negative.js && node scripts/test-double-spend.js &&node scripts/test-shop-e2e.js && node --max-old-space-size=512 src/index.js",
+    "test": "npm run phases:check && node scripts/test-internal-pattern.js && node scripts/test-p26-t0591.js && node scripts/test-p26-t0773.js && node scripts/test-t0671.js && node scripts/test-t0678.js && node scripts/test-t0708.js && node scripts/test-verdict.js && node scripts/test-wallet-blocked.js && node scripts/test-p18-negative.js && node scripts/test-double-spend.js &&node scripts/test-shop-e2e.js && node --max-old-space-size=512 src/index.js",
     "phases:doc": "node scripts/phases-doc.js",
     "phases:check": "node scripts/phases-doc.js --check",
     "test:era": "node scripts/test-mcp-era.js",

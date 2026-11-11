@@ -68,6 +68,10 @@ const PROBED_PREFIXES = [
   '/faq', '/faq.md',
   // T-0712: refund policy JSON (A-GD-01); real probe in 26.5 below.
   '/policy/refunds.json',
+  // T-0773 (A-GD-02 shipped the /dispute page and /dispute/dispute.js; rule
+  // T-08: the shipper owns the probe): '/dispute' covers /dispute/ and
+  // /dispute/dispute.js; real liveness probes in 26.3 below.
+  '/dispute',
 ];
 // The bare root '/' can only ever be an EXACT match — treating it as a
 // startsWith() prefix would trivially match every route on earth (every
@@ -205,6 +209,8 @@ const phase26 = async function phase26(scorer, config, context) {
     { path: '/robots.txt' }, { path: '/ai.txt' }, { path: '/llms.txt' }, { path: '/sitemap.xml' },
     { path: '/video/' }, { path: '/guides/' }, { path: '/autopilot/incident' },
     // T-0670: the six T-0591 locations; page = text/html, twin = text/markdown.
+    // T-0773: A-GD-02 dispute page and its script (no Markdown twin is served).
+    { path: '/dispute/', ct: 'text/html' }, { path: '/dispute/dispute.js', ct: 'javascript' },
     ...T0591_SLUGS.flatMap((s) => [{ path: s, ct: 'text/html' }, { path: `${s}.md`, ct: 'text/markdown' }]),
   ].map((e) => (typeof e === 'string' ? { path: e } : e));
   for (const { path, ct: wantCt } of livenessRoutes) {
