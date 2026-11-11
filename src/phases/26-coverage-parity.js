@@ -208,9 +208,9 @@ const phase26 = async function phase26(scorer, config, context) {
   const livenessRoutes = [
     { path: '/robots.txt' }, { path: '/ai.txt' }, { path: '/llms.txt' }, { path: '/sitemap.xml' },
     { path: '/video/' }, { path: '/guides/' }, { path: '/autopilot/incident' },
-    // T-0670: the six T-0591 locations; page = text/html, twin = text/markdown.
     // T-0773: A-GD-02 dispute page and its script (no Markdown twin is served).
     { path: '/dispute/', ct: 'text/html' }, { path: '/dispute/dispute.js', ct: 'javascript' },
+    // T-0670: the six T-0591 locations; page = text/html, twin = text/markdown.
     ...T0591_SLUGS.flatMap((s) => [{ path: s, ct: 'text/html' }, { path: `${s}.md`, ct: 'text/markdown' }]),
   ].map((e) => (typeof e === 'string' ? { path: e } : e));
   for (const { path, ct: wantCt } of livenessRoutes) {
