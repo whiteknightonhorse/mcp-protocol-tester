@@ -189,7 +189,7 @@ module.exports = async function phase27(scorer, config) {
       const r = await get(`${base}/api/v1/shop/shops/${encodeURIComponent(slug)}`);
       let j = null;
       try { j = JSON.parse(r.body); } catch { /* treated as not verified */ }
-      const verified = j?.domain_verified === true || j?.shop?.domain_verified === true;
+      const verified = j?.domain_verified === true;
       if (r.status !== 200) bad.push(`${slug} -> ${r.status}`);
       else if (!verified) {
         bad.push(`${slug} -> domain_verified not true`);
