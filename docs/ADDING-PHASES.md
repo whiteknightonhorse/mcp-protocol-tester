@@ -124,3 +124,13 @@ E3 required); otherwise E1/E3 are informational (recorded, pass). A check that c
 detected era (E2, E4 in legacy) is marked n/a with `scorer.blocked(phase, name, 'era-<era>', ...)`,
 not scored 0. No payment is made: E5 uses an unpaid call. Pure helpers: `src/lib/mcp-era.js`;
 self-test with three fake responses: `npm run test:era` (`scripts/test-mcp-era.js`).
+
+## Annotation honesty (P36, T-0858)
+
+P36 is a static check: it reads `tools/list` (the configured `MCP_SERVER_URL` as is, `nextCursor` followed, plus every URL in `ANNOTATION_EXTRA_MCP_URLS`; on apibase.pro with the variable unset, the storefront list P27 uses) and compares each tool's declared `readOnlyHint` / `destructiveHint` with what its name, description and input schema say. It never calls a tool. Rules live in `src/lib/annotation-rules.js` (pure, target-agnostic); fixtures in `scripts/test-annotation-rules.js`.
+
+- Verb classes (name tokens split on `.` `_` `-` and camelCase; the last matching token wins): MONEY (pay, refund, transfer, withdraw, payout, charge, purchase, buy), DELETE (delete, remove, purge, revoke, cancel, deactivate, destroy, drop), SEND (send, sms, email, notify, publish, post, command), WRITE (create, update, set, upsert, register, submit, write, upload, add, place). When no name token matches, a schema property (amount, to, recipient, tx_hash, body, message) plus a class verb in the description, or a class verb opening the description, gives an inferred class.
+- RED (`redRec`, 36.2, one per list): the class comes from the NAME, is MONEY or DELETE, and the tool declares `readOnlyHint: true` (write-as-readonly) or an explicit `destructiveHint: false` (irreversible-as-additive). RED for P36 was signed off in TOOL-ANNOTATIONS-1116 ruling-1; do not widen it or add a per-target allowlist.
+- Yellow (36.3): SEND tool declared additive or any SEND/WRITE tool declared read-only (a send cannot be recalled, so it is never RED), the RED conditions inferred only from schema or description, missing hints, a hint that is not a boolean.
+- 36.4 is a coverage line and always passes.
+- `ANNOTATION_EXTRA_MCP_URLS`: comma list; unset = default by host, empty = no extra list.

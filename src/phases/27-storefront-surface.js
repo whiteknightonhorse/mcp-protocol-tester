@@ -164,3 +164,4 @@ module.exports = async function phase27(scorer, config) {
 };
 
 module.exports.mcpGetAnswerOk = mcpGetAnswerOk;
+module.exports.SLUG = SLUG;

@@ -28,6 +28,9 @@ const config = {
   moderationSacrificialKey: process.env.MODERATION_TEST_API_KEY || '',
   balanceRailTestKey: process.env.BALANCE_RAIL_TEST_KEY || '',
   deviceTestKey: process.env.DEVICE_TEST_API_KEY || '',
+  // P36 (T-0858): extra MCP list URLs to check, comma list. null = env unset (the phase then defaults by host).
+  annotationExtraUrls: process.env.ANNOTATION_EXTRA_MCP_URLS === undefined ? null
+    : process.env.ANNOTATION_EXTRA_MCP_URLS.split(',').map((s) => s.trim()).filter(Boolean),
   deviceTestVendor: process.env.DEVICE_TEST_VENDOR || 'tuya',
 };
 

@@ -21,6 +21,7 @@ Tests **x402** (USDC on Base) and **MPP** (USDC on Tempo) protocols simultaneous
 - **Full MCP protocol validation** — initialize, tools/list, tools/call, resources/list, prompts/list, version negotiation
 - **402 challenge validation** — every tool checked for correct payment challenge fields (payTo, network, asset, amount)
 - **Payment security** — replay attacks, race conditions, double-spend (RED only on more than one charged delivery or distinct receipt; dedup replays are allowed; 8.2 pays with its own `date` argument so the 2-minute dedup window cannot swallow its payment, and an all-replay run reports INCONCLUSIVE (INFO), not red - T-0717), amount manipulation, stale challenges
+- **Declared tool safety hints** (P36) — the suite checks the `readOnlyHint` / `destructiveHint` each listed tool declares against its name, description and input schema, statically, and never calls a tool to do so. Rules: [docs/ADDING-PHASES.md](docs/ADDING-PHASES.md#annotation-honesty-p36-t-0858)
 - **Advanced security** — SSRF, timing attacks, CORS, header injection, fuzz testing, response analysis
 - **Payment bypass prevention** — replay, double-spend 100x, signed underpayment, cache leak, MCP session abuse, cross-rail nonce
 - **Resilience testing** — brute force, SSL/TLS cipher/cert validation, enumeration, error cascade
@@ -132,6 +133,7 @@ One numbering: file prefix = `PHASES` value = report label. The table below and 
 | P32 | Webhook Signature | $0 |
 | P34 | Legal 428 Gate | $0 |
 | P35 | Shop Paid E2E | $0.02-0.05 |
+| P36 | Annotation Honesty | $0 |
 
 Phases that can spend (Cost not $0): P4, P5, P6, P8, P18, P20, P22, P25, P35. What each phase tests, its file and weight: [docs/PHASES.md](docs/PHASES.md).
 <!-- phases:end -->
@@ -167,6 +169,7 @@ more once the sacrificial-key phases are provisioned). The P6 receipt-retrieve c
 | `E2E_MERCHANT_KEY`| No       | (none)                              | Reserved for the future webhook-delivery card; no phase reads it today |
 | `TERMS_TEST_SHOP_SLUG` | No  | `tester-terms-pending`              | Never-activated fixture merchant P34.2 probes for the 428 terms gate; registered once by the tester wallet if missing, never activated |
 | `TERMS_TEST_CONTACT_EMAIL` | No | `tester-terms-pending@apibase.pro` | Contact e-mail used only when P34 registers the fixture merchant |
+| `ANNOTATION_EXTRA_MCP_URLS` | No | unset (on apibase.pro: the storefront list P27 uses) | Comma list of extra MCP URLs whose `tools/list` P36 checks, next to `MCP_SERVER_URL`; set empty to check only `MCP_SERVER_URL` |
 | `WALLET_FLOOR_USD` | No      | `1.50`                              | P5/P6 print `wallet-balance:` for both rails and warn below this floor; below the per-run need (0.035 Tempo, 0.030 Base) the phase is BLOCKED(wallet-empty) |
 
 > \* `PRIVATE_KEY` is required by every phase whose Cost column is not $0. The same key works on both Base and Tempo chains.
