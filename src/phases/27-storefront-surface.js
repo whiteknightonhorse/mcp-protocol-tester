@@ -125,13 +125,33 @@ module.exports = async function phase27(scorer, config) {
     }
   }
 
-  // 27.4 — /shops and /integrator (HTML + Markdown negotiation).
-  let shopSlugs = [];
+  // 27.4 — the shop index (JSON, source of truth for "listed"), /shops HTML,
+  // /integrator (HTML + Markdown negotiation). T-0861: slugs come from the JSON
+  // index, not from every /m/ link on the HTML page (a link outside the table
+  // made the check pass while the index had zero rows).
+  let listed = [];
   try {
+    let total = 0;
+    let jsonStatus = 0;
+    for (let page = 1; page <= 10; page++) {
+      const r = await get(`${base}/api/v1/shop/shops?page=${page}`);
+      jsonStatus = r.status;
+      let j = null;
+      try { j = JSON.parse(r.body); } catch { /* handled below */ }
+      if (!j || !Array.isArray(j.shops)) break;
+      total = Number(j.total) || 0;
+      const before = listed.length;
+      for (const x of j.shops) if (x && typeof x.slug === 'string' && !listed.includes(x.slug)) listed.push(x.slug);
+      if (listed.length >= total || listed.length === before) break;
+    }
+    scorer.rec(PHASE, '27.4 GET /api/v1/shop/shops (JSON index)', 'total >= 1 + apibase-demo listed',
+      `${jsonStatus}, total=${total}, listed=[${listed.join(',')}]`,
+      jsonStatus === 200 && total >= 1 && listed.includes(SLUG));
     const shops = await get(`${base}/shops`);
-    shopSlugs = [...new Set([...shops.body.matchAll(/href="\/m\/([a-z0-9-]+)"/g)].map((m) => m[1]))];
-    scorer.rec(PHASE, '27.4 GET /shops', '200 text/html + >=1 shop', `${shops.status}, ${shopSlugs.length} shops`,
-      shops.status === 200 && shops.ct.includes('text/html') && shopSlugs.length >= 1);
+    const missingLinks = listed.filter((s) => !shops.body.includes(`href="/m/${s}"`));
+    scorer.rec(PHASE, '27.4 GET /shops', '200 text/html + a link per listed shop',
+      `${shops.status} ${shops.ct.split(';')[0]}, no link for: [${missingLinks.join(',')}]`,
+      shops.status === 200 && shops.ct.includes('text/html') && missingLinks.length === 0);
     const integ = await get(`${base}/integrator`);
     scorer.rec(PHASE, '27.4 GET /integrator', '200 text/html', `${integ.status} ${integ.ct.split(';')[0]}`,
       integ.status === 200 && integ.ct.includes('text/html'));
@@ -139,27 +159,49 @@ module.exports = async function phase27(scorer, config) {
     scorer.rec(PHASE, '27.4 /integrator Accept: text/markdown', '200 text/markdown', `${md.status} ${md.ct.split(';')[0]}`,
       md.status === 200 && md.ct.includes('text/markdown') && md.body.length > 0);
   } catch (e) {
-    scorer.recCatch(PHASE, '27.4 /shops, /integrator', '200', e);
+    scorer.recCatch(PHASE, '27.4 shop index, /shops, /integrator', '200', e);
   }
 
-  // 27.5 — rest_base parity: REST discover kind=merchant vs /shops. Discover is
+  // 27.5 — REST discover kind=merchant vs the JSON shop index. Discover is
   // intent-ranked, so it cannot enumerate; the union over a few broad intents
-  // must be a non-empty subset of the /shops slugs (a discovered shop missing
-  // from /shops is a listing divergence). The demo shop must appear in both.
+  // must be a non-empty subset of the listed slugs, with the demo shop in both.
+  let found = new Set();
   try {
-    const found = new Set();
     for (const intent of ['shop', 'guide']) {
       const d = await get(`${base}/api/v1/discover?kind=merchant&intent=${intent}&limit=50`);
       let j = null;
       try { j = JSON.parse(d.body); } catch { /* handled below */ }
       for (const x of j?.results || []) if (x.kind === 'merchant') found.add(x.slug);
     }
-    const extra = [...found].filter((s) => !shopSlugs.includes(s));
+    const extra = [...found].filter((s) => !listed.includes(s));
     scorer.rec(PHASE, '27.5 discover kind=merchant slugs are listed on /shops', 'non-empty subset',
-      `discover=[${[...found].join(',')}] shops=[${shopSlugs.join(',')}] not-on-shops=[${extra.join(',')}]`,
-      found.size >= 1 && extra.length === 0 && found.has(SLUG) && shopSlugs.includes(SLUG));
+      `discover=[${[...found].join(',')}] listed=[${listed.join(',')}] not-listed=[${extra.join(',')}]`,
+      found.size >= 1 && extra.length === 0 && found.has(SLUG) && listed.includes(SLUG));
   } catch (e) {
     scorer.recCatch(PHASE, '27.5 discover/shops parity', 'subset', e);
+  }
+
+  // 27.6 — every discovered shop (at most 5) is domain-verified.
+  try {
+    const slugs = [...found].slice(0, 5);
+    const bad = [];
+    for (const slug of slugs) {
+      const r = await get(`${base}/api/v1/shop/shops/${encodeURIComponent(slug)}`);
+      let j = null;
+      try { j = JSON.parse(r.body); } catch { /* treated as not verified */ }
+      const verified = j?.domain_verified === true || j?.shop?.domain_verified === true;
+      if (r.status !== 200) bad.push(`${slug} -> ${r.status}`);
+      else if (!verified) {
+        bad.push(`${slug} -> domain_verified not true`);
+        scorer.addError('HIGH', PHASE, 'unverified shop offered by discover',
+          `discover kind=merchant returned ${slug} but GET /api/v1/shop/shops/${slug} reports domain_verified != true`,
+          'discover must list only status=active AND domain_verified merchants (the same rule as /shops)');
+      }
+    }
+    scorer.rec(PHASE, '27.6 discovered shops are domain-verified', `${slugs.length} x 200 + domain_verified true`,
+      bad.length ? bad.join('; ') : `${slugs.length} ok`, slugs.length >= 1 && bad.length === 0);
+  } catch (e) {
+    scorer.recCatch(PHASE, '27.6 discovered shops domain_verified', '200', e);
   }
 };
 
