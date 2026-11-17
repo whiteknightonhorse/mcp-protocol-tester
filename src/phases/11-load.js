@@ -3,7 +3,7 @@
  * Parallel stress test with configurable concurrency.
  * Tests catalog fetch, tool calls, and mixed endpoints under load.
  */
-const { sf, drain } = require('../lib/http');
+const { sf, drain, tally, tallyText } = require('../lib/http');
 
 const PHASE = 'P11';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -15,6 +15,29 @@ module.exports = async function phase11(scorer, config, context) {
   const AUTH = { 'Content-Type': 'application/json' };
   if (config.apiKey) AUTH['Authorization'] = `Bearer ${config.apiKey}`;
 
+  // Since T-0836 GET /tools carries a 120/min per-address limit and this phase
+  // sends ~110 such requests. Start inside a fresh window: one probe, at most
+  // one wait, never a loop.
+  const TOOL_LIST_NEEDED = 110;
+  let windowChecked = false;
+  {
+    const probe = await sf(`${config.apiUrl}/tools?limit=1`, {}, config.timeoutMs);
+    const remaining = parseInt(probe.headers?.get?.('ratelimit-remaining'), 10);
+    const reset = parseInt(probe.headers?.get?.('ratelimit-reset'), 10);
+    await drain(probe);
+    if (Number.isNaN(remaining) || Number.isNaN(reset)) {
+      console.log('  tool-list window: headers absent');
+    } else {
+      windowChecked = true;
+      let waited = 0;
+      if (remaining < TOOL_LIST_NEEDED) {
+        waited = Math.min(reset + 1, 61);
+        await sleep(waited * 1000);
+      }
+      console.log(`  tool-list window: remaining=${remaining}, waited ${waited}s`);
+    }
+  }
+
   // 11.1 Parallel catalog fetch
   console.log(`  11.1 ${N * 4}x concurrent GET /tools ...`);
   const batch1 = Array(N * 4).fill(null).map(() => sf(`${config.apiUrl}/tools`, {}, config.timeoutMs));
@@ -22,7 +45,7 @@ module.exports = async function phase11(scorer, config, context) {
   const ok1 = res1.filter(r => r.status === 200).length;
   const rateLimit1 = res1.filter(r => r.status === 429).length;
   scorer.rec(PHASE, `11.1 ${N * 4}x GET /tools`, `>=${N * 3} OK`, `${ok1} OK ${rateLimit1} throttled`,
-    ok1 >= N * 3);
+    ok1 >= N * 3, tallyText(tally(res1)));
   for (const r of res1) await drain(r);
   await sleep(2000);
 
@@ -66,13 +89,15 @@ module.exports = async function phase11(scorer, config, context) {
 
   // 11.4 Sustained requests (30 sequential, fast)
   console.log('  11.4 Sustained 30 sequential requests ...');
-  let sustained200 = 0;
+  const sustained = [];
   for (let i = 0; i < 30; i++) {
     const r = await sf(`${config.apiUrl}/tools`, {}, 10000);
-    if (r.status === 200) sustained200++;
+    sustained.push({ status: r.status, _timeout: r._timeout });
     await drain(r);
   }
-  scorer.rec(PHASE, '11.4 Sustained 30 sequential', '>=25 OK', `${sustained200}/30`, sustained200 >= 25);
+  const sustained200 = sustained.filter(r => r.status === 200).length;
+  scorer.rec(PHASE, '11.4 Sustained 30 sequential', '>=25 OK', `${sustained200}/30`, sustained200 >= 25,
+    tallyText(tally(sustained)));
 
   // 11.5 Latency percentiles
   console.log('  11.5 Latency percentiles (20 requests) ...');
@@ -97,8 +122,19 @@ module.exports = async function phase11(scorer, config, context) {
     const batch = Array(n).fill(null).map(() => sf(`${config.apiUrl}/tools`, {}, 15000));
     const results = await Promise.all(batch);
     const rampOk = results.filter(r => r.status === 200).length;
-    scorer.recQ(PHASE, `11.6 ramp-${n}`, `>=${Math.floor(n * 0.8)}`, `${rampOk}/${n}`,
-      rampOk >= Math.floor(n * 0.8));
+    const t = tally(results);
+    const floor = Math.floor(n * 0.8);
+    const pass = rampOk >= floor;
+    let detail = tallyText(t);
+    if (!pass && windowChecked && t.server === 0 && t.timeout === 0 && t.other === 0 && t.throttled > 0) {
+      detail = `${detail} | throttled inside a fresh window`;
+    }
+    scorer.recQ(PHASE, `11.6 ramp-${n}`, `>=${floor}`, `${rampOk}/${n}`, pass, detail);
+    console.log(`  [${pass ? 'OK ' : '!! '}] 11.6 ramp-${n} — ${rampOk}/${n} | ${detail}`);
+    if (t.server > 0 || t.timeout > 0) {
+      scorer.addError('HIGH', PHASE, `11.6 ramp-${n}: 5xx or timeout under load`,
+        `${rampOk}/${n} OK; ${tallyText(t)}`, 'Check server capacity and upstream timeouts under concurrency');
+    }
     for (const r of results) await drain(r);
     await sleep(500);
   }

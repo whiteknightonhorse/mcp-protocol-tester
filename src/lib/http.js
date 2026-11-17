@@ -134,6 +134,23 @@ function curlRawPath(url, opts = {}, tmo = 25000) {
   });
 }
 
+// T-0879: classify a batch of sf() results so a failed load step says what it saw.
+function tally(results) {
+  const t = { ok: 0, throttled: 0, server: 0, timeout: 0, other: 0 };
+  for (const r of results) {
+    if (r && r._timeout) t.timeout++;
+    else if (r.status === 200) t.ok++;
+    else if (r.status === 429) t.throttled++;
+    else if (r.status >= 500 && r.status <= 599) t.server++;
+    else t.other++;
+  }
+  return t;
+}
+
+function tallyText(t) {
+  return `200=${t.ok} 429=${t.throttled} 5xx=${t.server} tmo=${t.timeout} other=${t.other}`;
+}
+
 function getDelay(toolId) {
   const p = toolId.split('.')[0];
   const delays = {
@@ -144,4 +161,4 @@ function getDelay(toolId) {
   return delays[p] || 350;
 }
 
-module.exports = { sf, drain, getDelay, setTesterId, withTesterHeader, curlRequest, curlRawPath, diffTransportProbe };
+module.exports = { sf, drain, tally, tallyText, getDelay, setTesterId, withTesterHeader, curlRequest, curlRawPath, diffTransportProbe };
