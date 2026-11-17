@@ -138,7 +138,8 @@ function curlRawPath(url, opts = {}, tmo = 25000) {
 function tally(results) {
   const t = { ok: 0, throttled: 0, server: 0, timeout: 0, other: 0 };
   for (const r of results) {
-    if (r && r._timeout) t.timeout++;
+    if (!r) t.other++;
+    else if (r._timeout) t.timeout++;
     else if (r.status === 200) t.ok++;
     else if (r.status === 429) t.throttled++;
     else if (r.status >= 500 && r.status <= 599) t.server++;
