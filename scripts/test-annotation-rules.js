@@ -57,5 +57,54 @@ check('f ledger.entry.record -> yellow inferred, not red', keys(f).join() === 'y
 check('bad-type yellow', keys({ name: 'x.y.get', annotations: { readOnlyHint: 'yes' } }).includes('yellow:bad-type'), keys({ name: 'x.y.get', annotations: { readOnlyHint: 'yes' } }));
 check('SEND readOnly true -> yellow send-as-additive, never red', keys({ name: 'chat.message.send', annotations: { readOnlyHint: true } }).join() === 'yellow:send-as-additive', keys({ name: 'chat.message.send', annotations: { readOnlyHint: true } }));
 
+// g. T-0887: the ten false yellows of 2026-11-16 -> no finding (schema cases quote the live tools/list)
+const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+const gCases = [
+  { name: 'email.validation.check', annotations: RO },
+  { name: 'email.verification.check', annotations: RO },
+  { name: 'security.ipqs.email_check', annotations: RO },
+  { name: 'email.transactional.status', annotations: RO },
+  { name: 'geonames.place.search', annotations: RO },
+  { name: 'geonames.place.timezone', annotations: RO },
+  { name: 'norway-kartverket-stedsnavn.places.get_place', annotations: RO },
+  {
+    name: 'phone.telnyx.estimate',
+    description: 'Classify a destination phone number into the right pricing tier (na / world / premium) and return the recommended send tool and price. Use this BEFORE telnyx.send_sms_* to avoid 400 errors. $0.001/lookup (Telnyx)',
+    inputSchema: { type: 'object', properties: { to: { type: 'string' } } },
+    annotations: RO,
+  },
+  {
+    name: 'irail.transit.connections',
+    description: 'Find train connections between two Belgian railway stations — returns up to 10 journeys with departure/arrival times, total duration, delays, transfer stations (vias), train numbers, platform numbers, and cancellation flags. Supports departure or arrival time selection. No auth required. Data: iRail real-time SNCB/NMBS Belgium train data.',
+    inputSchema: { type: 'object', properties: { from: {}, to: {}, timesel: {}, results: {}, date: {}, time: {}, lang: {} } },
+    annotations: RO,
+  },
+  {
+    name: 'shop.merchant.accept_terms',
+    description: 'Accept the four merchant documents (merchant-agreement, aup, dpa, refund-framework) by signing the APIbase acceptance message with the merchant wallet. Activates the merchant and returns the mk_live_ API key once.',
+    inputSchema: { type: 'object', properties: { wallet: {}, doc_hashes: {}, message: {}, signature: {}, method: {} } },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+];
+for (const t of gCases) check(`g ${t.name} -> no finding`, keys(t).length === 0, keys(t));
+
+// h. coverage that must not be lost
+const hCases = [
+  ['phone.telnyx.sms_na', { readOnlyHint: false, destructiveHint: false }, 'yellow:send-as-additive'],
+  ['phone.twilio.sms', { readOnlyHint: true }, 'yellow:send-as-additive'],
+  ['user.email', { readOnlyHint: true }, 'yellow:send-as-additive'],
+  ['orders.place_order', { readOnlyHint: true }, 'yellow:send-as-additive'],
+  ['shop.order.pay', { readOnlyHint: false, destructiveHint: false }, 'red:irreversible-as-additive'],
+];
+for (const [name, annotations, want] of hCases) check(`h ${name} -> ${want}`, keys({ name, annotations }).join() === want, keys({ name, annotations }));
+
+// i, j. schema inference needs a class verb at the start of a sentence
+const ledger = (description) => ({
+  name: 'ledger.entry.record', description,
+  inputSchema: { type: 'object', properties: { amount: {}, to: {} } }, annotations: { readOnlyHint: true },
+});
+check('i second sentence starts with a class verb -> yellow inferred', keys(ledger('Records an entry. Transfer the amount to the recipient.')).join() === 'yellow:inferred', keys(ledger('Records an entry. Transfer the amount to the recipient.')));
+check('j class words inside a sentence -> none', keys(ledger('Lists entries, including each transfer and refund.')).length === 0, keys(ledger('Lists entries, including each transfer and refund.')));
+
 if (bad) { console.error(`FAIL annotation-rules: ${bad} case(s)`); process.exit(1); }
 console.log('PASS annotation-rules');

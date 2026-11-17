@@ -7,6 +7,9 @@ const MONEY = new Set(['pay', 'refund', 'transfer', 'withdraw', 'payout', 'charg
 const DELETE = new Set(['delete', 'remove', 'purge', 'revoke', 'cancel', 'deactivate', 'destroy', 'drop']);
 const SEND = new Set(['send', 'sms', 'email', 'notify', 'publish', 'post', 'command']);
 const WRITE = new Set(['create', 'update', 'set', 'upsert', 'register', 'submit', 'write', 'upload', 'add', 'place']);
+// A name whose LAST token is a read verb treats `email` and `sms` as nouns (email.validation.check).
+const READ_LAST = new Set(['get', 'list', 'search', 'check', 'status', 'estimate', 'validate', 'verify', 'lookup', 'find', 'read', 'query', 'info', 'count']);
+const NOUN_WHEN_READ_LAST = new Set(['email', 'sms']);
 const CLASSES = [['MONEY', MONEY], ['DELETE', DELETE], ['SEND', SEND], ['WRITE', WRITE]];
 const SCHEMA_PROPS = ['amount', 'to', 'recipient', 'tx_hash', 'body', 'message'];
 const HINTS = ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'];
@@ -18,6 +21,24 @@ function tokens(name) {
     .split(/[.\-_\s]+/)
     .map((t) => t.toLowerCase())
     .filter(Boolean);
+}
+
+// Name tokens that may act as verbs: `email`/`sms` are skipped when the name ends in a READ_LAST
+// token; `place` counts only when another token follows it inside the same dot-segment.
+function verbTokens(name) {
+  if (typeof name !== 'string') return [];
+  const all = tokens(name);
+  const readLast = READ_LAST.has(all[all.length - 1]);
+  const out = [];
+  for (const seg of name.split('.')) {
+    const st = tokens(seg);
+    st.forEach((tok, i) => {
+      if (readLast && NOUN_WHEN_READ_LAST.has(tok)) return;
+      if (tok === 'place' && i === st.length - 1) return;
+      out.push(tok);
+    });
+  }
+  return out;
 }
 
 function classOf(word) {
@@ -35,23 +56,29 @@ function firstSentence(text) {
   return m ? m[0] : '';
 }
 
+// Sentences split on a newline, or on . ! ? followed by whitespace.
+function sentences(text) {
+  return typeof text === 'string' ? text.split(/\n|(?<=[.!?])\s+/) : [];
+}
+
 function classify(tool) {
   const t = tool && typeof tool === 'object' ? tool : {};
   // name: the LAST matching token wins ("cancel_order" -> DELETE)
   let cls = null;
-  for (const tok of tokens(t.name)) {
+  for (const tok of verbTokens(t.name)) {
     const c = classOf(tok);
     if (c) cls = c;
   }
   if (cls) return { cls, source: 'name' };
 
-  // schema: a telling property together with a class verb in the description
+  // schema: a telling property together with a class verb opening a sentence of the description
   const props = t.inputSchema && typeof t.inputSchema === 'object' && t.inputSchema.properties && typeof t.inputSchema.properties === 'object'
     ? Object.keys(t.inputSchema.properties) : [];
   if (props.some((p) => SCHEMA_PROPS.includes(p.toLowerCase()))) {
     let found = null;
-    for (const w of words(t.description)) {
-      const c = classOf(w);
+    for (const sent of sentences(t.description)) {
+      const w = words(sent)[0];
+      const c = w ? classOf(w) : null;
       if (c) { found = c; break; }
     }
     if (found) return { cls: found, source: 'schema' };
@@ -99,4 +126,4 @@ function judge(tool) {
   return findings;
 }
 
-module.exports = { tokens, classify, judge, MONEY, DELETE, SEND, WRITE };
+module.exports = { tokens, classify, judge, MONEY, DELETE, SEND, WRITE, READ_LAST };
