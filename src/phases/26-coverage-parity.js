@@ -68,6 +68,11 @@ const PROBED_PREFIXES = [
   '/faq', '/faq.md',
   // T-0712: refund policy JSON (A-GD-01); real probe in 26.5 below.
   '/policy/refunds.json',
+  // T-0898 (T-0882 shipped this exact location; rule T-08: the shipper owns the
+  // probe): an exact entry per /policy/* file, never a general '/policy/'
+  // prefix, so a future /policy/* location goes red until it has its own probe.
+  // Real probe in 26.5 below.
+  '/policy/test-wallets.json',
   // T-0773 (A-GD-02 shipped the /dispute page and /dispute/dispute.js; rule
   // T-08: the shipper owns the probe): '/dispute' covers /dispute/ and
   // /dispute/dispute.js; real liveness probes in 26.3 below.
@@ -326,6 +331,31 @@ const phase26 = async function phase26(scorer, config, context) {
       `${r.status} ${ct.split(';')[0]} ${parsed ? 'json' : 'not-json'}`, ok);
   } catch (e) {
     scorer.recCatch(PHASE, '26.5 /policy/refunds.json', '200 application/json + parses', e);
+  }
+
+  // T-0898: /policy/test-wallets.json (T-0882). Asserts the contract shape only;
+  // the wallet count, version, description text and addresses are deliberately
+  // not asserted (the list grows by design).
+  try {
+    const r = await sf(`${config.apiBaseUrl}/policy/test-wallets.json`);
+    const ct = r.headers?.get?.('content-type') || '';
+    const body = await (async () => { try { return await r.text(); } catch { return ''; } })();
+    let j = null;
+    try { j = JSON.parse(body); } catch { /* not JSON */ }
+    let got;
+    if (r.status !== 200) got = `${r.status}`;
+    else if (!ct.includes('application/json')) got = `200 ${ct.split(';')[0] || '(no content-type)'}`;
+    else if (j === null || typeof j !== 'object') got = '200 application/json not-json';
+    else if (j.schema !== 'apibase-test-wallets/1') got = '200 application/json bad-schema';
+    else if (!Array.isArray(j.wallets) || j.wallets.length === 0) got = '200 application/json no-wallets';
+    else if (!j.labels || typeof j.labels !== 'object' || Array.isArray(j.labels)) got = '200 application/json bad-labels';
+    else if (!j.wallets.every((w) => w && typeof w.address === 'string' && /^0x[0-9a-f]{40}$/.test(w.address))) got = '200 application/json bad-address';
+    else if (!j.wallets.every((w) => typeof w.label === 'string' && Object.prototype.hasOwnProperty.call(j.labels, w.label))) got = '200 application/json bad-label';
+    else got = `200 application/json wallets=${j.wallets.length} ok`;
+    scorer.rec(PHASE, '26.5 /policy/test-wallets.json', '200 application/json + schema apibase-test-wallets/1 + valid wallets',
+      got, got.endsWith(' ok'));
+  } catch (e) {
+    scorer.recCatch(PHASE, '26.5 /policy/test-wallets.json', '200 application/json + schema apibase-test-wallets/1 + valid wallets', e);
   }
 
   console.log(`  Coverage parity: ${liveRoutes.length} nginx locations, ${unprobed.length} unprobed`);
