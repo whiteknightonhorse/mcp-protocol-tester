@@ -42,6 +42,24 @@ async function readRail(rail, signerKey) {
   }
 }
 
+// EIP-3009 authorizationState(authorizer, nonce) on Base USDC: true = the nonce was used (the transfer settled
+// or the authorization was cancelled), false = unused, null = cannot be read in one call.
+const AUTH_STATE_ABI = [{
+  name: 'authorizationState', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'authorizer', type: 'address' }, { name: 'nonce', type: 'bytes32' }], outputs: [{ type: 'bool' }],
+}];
+async function readAuthState(authorizer, nonce) {
+  try {
+    const { createPublicClient, http } = require('viem');
+    const chains = require('viem/chains');
+    const client = createPublicClient({ chain: chains.base, transport: http(undefined, { retryCount: 0 }) });
+    const used = await withTimeout(client.readContract({ address: BASE_USDC, abi: AUTH_STATE_ABI, functionName: 'authorizationState', args: [authorizer, nonce] }), 10000);
+    return typeof used === 'boolean' ? used : null;
+  } catch {
+    return null;
+  }
+}
+
 const fmt = (v) => (v === null ? 'unknown' : v.toFixed(4));
 
 // Prints the wallet-balance line (both rails) and the floor warning. Returns
@@ -60,4 +78,4 @@ async function walletPreflight(config, rail, read = readRail) {
   return { tempo, base, short };
 }
 
-module.exports = { walletPreflight, readRail, NEED_USD };
+module.exports = { walletPreflight, readRail, readAuthState, NEED_USD };

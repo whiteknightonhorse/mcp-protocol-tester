@@ -6,8 +6,8 @@
 const { sf, drain, diffTransportProbe, curlRawPath } = require('../lib/http');
 const { mcpRequest } = require('../lib/mcp-client');
 const { getX402Client, makeX402Payment, makeX402PaymentPayload, getX402HttpClient } = require('../lib/x402-client');
-const { buildMutations, NAMES, WALLET_SIGNIN } = require('../lib/p18-negative');
-const { readRail } = require('../lib/wallet-balance');
+const { buildMutations, NAMES, WALLET_SIGNIN, CONTROL, classifyNegative } = require('../lib/p18-negative');
+const { readRail, readAuthState } = require('../lib/wallet-balance');
 const { classifyDoubleSpend } = require('../lib/double-spend');
 
 const PHASE = 'P18';
@@ -81,14 +81,31 @@ module.exports = async function phase18(scorer, config, context) {
           if (r.status === 200) served = true;
           await sleep(300);
         }
-        console.log('    Waiting 90s to check for any transfer from the test wallet...');
+        console.log('    Waiting 90s, then reading the EIP-3009 nonce state of each mutated authorization...');
         await sleep(90000);
         const balAfter = await readRail('base', config.privateKey);
-        const moved = balBefore != null && balAfter != null && balAfter < balBefore;
-        for (const [k, status, refused] of sent) {
-          const ok = refused && !moved;
-          scorer.redRec(PHASE, NAMES[k], '402, no output, no transfer', `${status}${moved ? ' + balance moved' : ''}`, ok,
-            ok ? 'refused' : (status === 200 ? 'CRITICAL: mutated payment accepted!' : moved ? `CRITICAL: balance ${balBefore} -> ${balAfter}` : `CRITICAL: unexpected status ${status}`));
+        console.log(`    balance (informational, shared wallet): ${balBefore} -> ${balAfter}`);
+        // Reads authorizationState up to 3 tries 2 s apart; stops at the first readable answer.
+        const readState = async (who, nonce) => {
+          for (let i = 0; i < 3; i++) {
+            const u = await readAuthState(who, nonce);
+            if (u !== null) return u;
+            if (i < 2) await sleep(2000);
+          }
+          return null;
+        };
+        const control = await readState(CONTROL.authorizer, CONTROL.nonce);
+        console.log(`    control nonce (settled authorization) reads used: ${control}`);
+        if (control !== true) {
+          for (const [k] of sent) scorer.blocked(PHASE, NAMES[k], 'nonce-state-unreadable', 'control nonce did not read as used; N1-N7 transfer check NOT exercised');
+        } else {
+          for (const [k, status, refused] of sent) {
+            const auth = muts[k].payload.authorization;
+            const used = await readState(auth.from, auth.nonce);
+            const v = classifyNegative({ status, refused, used });
+            if (v.world) scorer.blocked(PHASE, NAMES[k], v.world, v.det);
+            else scorer.redRec(PHASE, NAMES[k], '402, no output, nonce unused', v.got, v.ok, v.det);
+          }
         }
         if (served) console.log('    CRITICAL: a mutated authorization was served, matrix stopped (V4)');
       }

@@ -1,6 +1,6 @@
 // T-0653 self-test: seven mutations -> seven distinct payloads, each differing from the valid one in exactly the intended field.
 const assert = require('assert');
-const { buildMutations, OTHER_PAYTO, OTHER_ASSET, WALLET_SIGNIN } = require('../src/lib/p18-negative');
+const { buildMutations, classifyNegative, CONTROL, OTHER_PAYTO, OTHER_ASSET, WALLET_SIGNIN } = require('../src/lib/p18-negative');
 
 const base = {
   x402Version: 2,
@@ -44,5 +44,20 @@ const diff = (a, b) => { const A = Object.fromEntries(leaves(a)); const B = Obje
   assert.strictEqual(m.N7.payload.signature.length, m.valid.payload.signature.length - 4);
   assert.strictEqual(new Set(['N1','N2','N3','N4','N5','N6','N7'].map((k) => m[k].payload.authorization.nonce)).size, 7);
   assert(WALLET_SIGNIN('example.com', '0xA', 'ab', 'T').startsWith('example.com wants you to sign in with your wallet.\n'));
+  // T-0914: the verdict comes from the nonce state of the mutated authorization, never from a balance.
+  const ok1 = classifyNegative({ status: 402, refused: true, used: false });
+  assert(ok1.ok && ok1.det === 'refused', 'refused + unused nonce must be ok');
+  const used1 = classifyNegative({ status: 402, refused: true, used: true });
+  assert(!used1.ok && used1.det.includes('nonce used'), 'used nonce must be RED');
+  const acc = classifyNegative({ status: 200, refused: false, used: false });
+  assert(!acc.ok && acc.det.includes('accepted'), '200 must be RED');
+  const unr = classifyNegative({ status: 402, refused: true, used: null });
+  assert(!unr.ok && unr.world === 'nonce-state-unreadable', 'unreadable nonce state must be BLOCKED, never ok');
+  assert(/^0x[0-9a-f]{40}$/.test(CONTROL.authorizer) && /^0x[0-9a-f]{64}$/.test(CONTROL.nonce), 'CONTROL pair shape');
+  // mutation line: used forced to true for N1 -> RED, restored -> ok
+  const forced = classifyNegative({ status: 402, refused: true, used: true });
+  const restored = classifyNegative({ status: 402, refused: true, used: false });
+  assert(!forced.ok && restored.ok);
+  console.log('MUTATION N1: used=true -> RED (' + forced.det + '); restored used=false -> ok (' + restored.det + ')');
   console.log('PASS p18-negative: 7 mutations, 7 distinct payloads, each differs only in the intended field');
 })().catch((e) => { console.error('FAIL p18-negative:', e.message); process.exit(1); });

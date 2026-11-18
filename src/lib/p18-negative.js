@@ -15,6 +15,25 @@ const NAMES = {
   N10: '18.N10 sign-in stale message',
 };
 
+// Control pair for the N1-N7 nonce check: an authorization that DID settle on Base USDC, so
+// authorizationState(authorizer, nonce) must read true. Settle tx
+// 0x08c16d7a0a07652b476ca0745978435428f5ade8613278ee1034dae1d5b685d8 (tester wallet, 1000 units to the APIbase payTo).
+const CONTROL = {
+  authorizer: '0xe03d9423d06dd5e3300fb1c09a03ddbb5e8b274b',
+  nonce: '0xd9af69f6840460cbd47bb1a4e1cc763dc55765fff7b061f196e233943d63d5c7',
+};
+
+// Verdict for one mutated authorization. status: HTTP status; refused: 402 without tool output;
+// used: authorizationState of its own nonce (true / false / null = unreadable). Pure.
+function classifyNegative({ status, refused, used }) {
+  const got = `${status}${used === true ? ' + nonce used' : ''}`;
+  if (used === true) return { ok: false, got, det: 'CRITICAL: mutated authorization settled on-chain (nonce used)' };
+  if (status === 200) return { ok: false, got, det: 'CRITICAL: mutated payment accepted!' };
+  if (!refused) return { ok: false, got, det: `CRITICAL: unexpected status ${status}` };
+  if (used === null || used === undefined) return { ok: false, world: 'nonce-state-unreadable', got, det: 'nonce state could not be read; transfer check NOT exercised' };
+  return { ok: true, got, det: 'refused' };
+}
+
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const flipNetwork = (n) => (n === 'eip155:8453' ? 'eip155:84532' : 'eip155:8453');
 const freshNonce = (rand) => '0x' + Buffer.from(rand(32)).toString('hex');
@@ -48,4 +67,4 @@ async function buildMutations({ base, resign, secondAddress, now = Date.now(), r
 const WALLET_SIGNIN = (domain, address, nonce, issuedAt, purpose = 'reissue') =>
   `${domain} wants you to sign in with your wallet.\nAddress: ${address}\nPurpose: ${purpose}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
 
-module.exports = { OTHER_PAYTO, OTHER_ASSET, NAMES, buildMutations, flipNetwork, WALLET_SIGNIN };
+module.exports = { CONTROL, classifyNegative, OTHER_PAYTO, OTHER_ASSET, NAMES, buildMutations, flipNetwork, WALLET_SIGNIN };
