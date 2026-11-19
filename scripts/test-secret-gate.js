@@ -1,18 +1,26 @@
 #!/usr/bin/env node
 'use strict';
-// Self-test for scripts/secret-gate.js (T-0920). Keys are random at run time; no 64-hex literal here.
+// Self-test for scripts/secret-gate.js (T-0920). Runs main() in-process (no subprocess). Keys are random at run time; no 64-hex literal here.
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { main } = require('./secret-gate');
 
-const GATE = path.join(__dirname, 'secret-gate.js');
 const root = path.join(__dirname, '..');
 const hex = () => '0x' + crypto.randomBytes(32).toString('hex');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'secret-gate-'));
 let n = 0;
+
+function gate(argv) {
+  const lines = [];
+  const { log, error } = console;
+  console.log = console.error = (...a) => lines.push(a.join(' '));
+  let code;
+  try { code = main(argv); } finally { console.log = log; console.error = error; }
+  return { code, out: lines.join('\n') };
+}
 
 function run(files, entries) {
   const d = path.join(tmp, `c${n++}`);
@@ -23,8 +31,7 @@ function run(files, entries) {
   const src = path.join(d, 'src');
   fs.mkdirSync(src);
   for (const name of Object.keys(files)) fs.renameSync(path.join(d, name), path.join(src, name));
-  const r = spawnSync('node', [GATE, al, src], { encoding: 'utf8' });
-  return { code: r.status, out: r.stdout + r.stderr };
+  return gate([al, src]);
 }
 const entry = (value, kind = 'tx-hash', proof = 'fixture') => ({ value, kind, where: 'fixture', proof });
 
@@ -53,7 +60,7 @@ assert.strictEqual(r.code, 1, r.out);
 r = run({ 'a.js': 'x = 1\n' }, [entry(v)]);
 assert.strictEqual(r.code, 1, r.out);
 
-const real = spawnSync('node', [GATE, '.github/secret-allowlist.json', 'src', 'scripts'], { cwd: root, encoding: 'utf8' });
-assert.strictEqual(real.status, 0, real.stdout + real.stderr);
+const real = gate([path.join(root, '.github/secret-allowlist.json'), path.join(root, 'src'), path.join(root, 'scripts')]);
+assert.strictEqual(real.code, 0, real.out);
 
 console.log('secret gate self-test: 8 cases passed');

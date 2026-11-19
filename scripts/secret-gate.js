@@ -31,6 +31,7 @@ function main(argv) {
     const ok = e && typeof e.value === 'string' && /^0x[0-9a-f]{64}$/i.test(e.value)
       && KINDS.has(e.kind) && typeof e.proof === 'string' && e.proof.trim() !== '';
     if (!ok) { console.error(`::error::allowlist entry ${i} invalid (value 0x+64hex, kind one of ${[...KINDS].join('/')}, non-empty proof)`); bad++; continue; }
+    if (allowed.has(e.value.toLowerCase())) { console.error(`::error::allowlist entry ${i} duplicates an earlier value`); bad++; continue; }
     allowed.set(e.value.toLowerCase(), 0);
   }
   const files = [];
