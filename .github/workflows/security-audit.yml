@@ -78,18 +78,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '20'
+
       - name: Check for private keys
-        run: |
-          echo "Scanning for hardcoded private keys in src/..."
-          # Exempt only the public ERC-20 Transfer(address,address,uint256) event
-          # topic (keccak256 of the signature, not a key) in src/lib/shop-e2e.js.
-          FOUND=$(grep -rn "0x[0-9a-fA-F]\{64\}" src/ | grep -v "TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'" || true)
-          if [ -n "$FOUND" ]; then
-            echo "::error::Found potential private key in source code!"
-            echo "$FOUND"
-            exit 1
-          fi
-          echo "No private keys found in source code."
+        run: node scripts/secret-gate.js .github/secret-allowlist.json src scripts
+
+      - name: Secret gate self-test
+        run: node scripts/test-secret-gate.js
 
       - name: Check for API keys
         run: |

@@ -299,8 +299,8 @@ Both protocols can coexist on the same server — this tester verifies both work
 
 ```bash
 # Check for secrets in code
-grep -rn "0x[0-9a-fA-F]\{64\}" --include="*.js" src/
-# Should return: no matches
+node scripts/secret-gate.js .github/secret-allowlist.json src scripts
+# Should exit 0: only the public chain values listed with proof in .github/secret-allowlist.json
 
 # Check for eval/exec
 grep -rn "eval(\|child_process\|\.exec(" --include="*.js" src/

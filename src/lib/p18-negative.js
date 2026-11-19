@@ -18,6 +18,7 @@ const NAMES = {
 // Control pair for the N1-N7 nonce check: an authorization that DID settle on Base USDC, so
 // authorizationState(authorizer, nonce) must read true. Settle tx
 // 0x08c16d7a0a07652b476ca0745978435428f5ade8613278ee1034dae1d5b685d8 (tester wallet, 1000 units to the APIbase payTo).
+// Public chain values, admitted by exact value in .github/secret-allowlist.json.
 const CONTROL = {
   authorizer: '0xe03d9423d06dd5e3300fb1c09a03ddbb5e8b274b',
   nonce: '0xd9af69f6840460cbd47bb1a4e1cc763dc55765fff7b061f196e233943d63d5c7',
